@@ -4,17 +4,17 @@
 
 import { APIGatewayProxyResult } from "aws-lambda";
 import { CrdbClient } from "../lib/crdb";
-import { BedrockClient } from "../lib/bedrock";
+import { OpenRouterClient } from "../lib/openrouter";
 import { S3ClientService } from "../lib/s3";
 
 export async function handleHealth(
   crdb: CrdbClient,
-  bedrock: BedrockClient,
+  llm: OpenRouterClient,
   s3: S3ClientService,
 ): Promise<APIGatewayProxyResult> {
-  const [crdbOk, bedrockOk, s3Ok] = await Promise.all([
+  const [crdbOk, llmOk, s3Ok] = await Promise.all([
     crdb.healthCheck(),
-    bedrock.healthCheck(),
+    llm.healthCheck(),
     s3.healthCheck(),
   ]);
 
@@ -22,9 +22,9 @@ export async function handleHealth(
     statusCode: 200,
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      status: crdbOk && bedrockOk && s3Ok ? "ok" : "degraded",
+      status: crdbOk && llmOk && s3Ok ? "ok" : "degraded",
       crdb: crdbOk ? "connected" : "disconnected",
-      bedrock: bedrockOk ? "available" : "unavailable",
+      llm: llmOk ? "available" : "unavailable",
       s3: s3Ok ? "available" : "unavailable",
       version: "0.1.0",
     }),

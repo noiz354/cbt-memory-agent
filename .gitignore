@@ -53,6 +53,7 @@ infra/.terraform/
 *.tfstate
 *.tfstate.*
 *.tfvars
+*.tfplan
 
 # Serverless / SAM build artifacts
 lambda/dist/

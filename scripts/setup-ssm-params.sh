@@ -130,18 +130,10 @@ upload_param "ccloud/api-key" \
   "$CCLOUD_API_KEY" \
   "CockroachDB Cloud API key (service account)"
 
-# Optional: Bedrock (if configured)
-if [[ -n "${BEDROCK_ACCESS_KEY:-}" ]]; then
-  upload_param "bedrock/access-key" \
-    "$BEDROCK_ACCESS_KEY" \
-    "AWS Bedrock access key"
-fi
-
-if [[ -n "${BEDROCK_SECRET_KEY:-}" ]]; then
-  upload_param "bedrock/secret-key" \
-    "$BEDROCK_SECRET_KEY" \
-    "AWS Bedrock secret key"
-fi
+# OpenRouter API key (LLM inference + embeddings)
+upload_param "openrouter/api-key" \
+  "$OPENROUTER_API_KEY" \
+  "OpenRouter API key (LLM + embeddings)"
 
 # App Config
 upload_param "app/openrouter-daily-cap" \

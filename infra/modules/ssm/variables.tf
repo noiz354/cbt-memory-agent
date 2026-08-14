@@ -36,3 +36,9 @@ variable "openrouter_daily_cap" {
   type        = number
   default     = 50
 }
+
+variable "openrouter_api_key" {
+  description = "OpenRouter API key (sk-or-...)"
+  type        = string
+  sensitive   = true
+}

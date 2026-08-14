@@ -1,8 +1,8 @@
 # CockroachDB × AWS — CBT Memory Agent
 
 > CBT Memory Agent: on-device cognitive behavioral therapy workspace dengan
-> **CockroachDB** sebagai persistent memory layer dan **AWS** (Bedrock + Lambda + S3)
-> sebagai infrastruktur. Monorepo gabungan frontend (React) + backend (Lambda).
+> **CockroachDB** sebagai persistent memory layer dan **AWS** (Lambda + S3) +
+> **OpenRouter** (LLM inference) sebagai infrastruktur. Monorepo gabungan frontend (React) + backend (Lambda).
 
 **Hackathon:** CockroachDB × AWS Agent Challenge 2026
 **Tanggal:** 2026-08-13
@@ -34,9 +34,9 @@ CockroachDB — bukan hanya localStorage / file-based storage.
 
 | Service | Status | Penggunaan |
 |---|---|---|
-| **Amazon Bedrock** | ✅ WAJIB | LLM inference (Claude) + embeddings |
 | **AWS Lambda** | ✅ WAJIB | Serverless API handler |
 | **Amazon S3** | ✅ WAJIB | Export bundle storage |
+| **OpenRouter** | ✅ WAJIB | LLM inference (Llama free) + embeddings (bge-m3) |
 
 ### 4. Submission Requirements — WAJIB
 
@@ -55,7 +55,7 @@ CockroachDB — bukan hanya localStorage / file-based storage.
 |---|---|
 | **No raw media to backend** | Privacy: camera frames, audio PCM tetap on-device |
 | **BYOK keys never leave device** | Security: API keys dienkripsi IndexedDB + WebCrypto |
-| **Zero PII in LLM prompts** | Privacy: nama, email, phone tidak dikirim ke Bedrock |
+| **Zero PII in LLM prompts** | Privacy: nama, email, phone tidak dikirim ke OpenRouter |
 | **Crisis detection on-device** | Latency: regex lokal, tanpa network roundtrip |
 | **Hard purge irreversible** | Compliance: user request = data hilang selamanya |
 | **Auth token validation** | Security: setiap API call divalidasi |
@@ -83,10 +83,10 @@ CockroachDB — bukan hanya localStorage / file-based storage.
 └───┬──────────────┬───────────────┬───────────────────────────┘
     │              │               │
     ▼              ▼               ▼
-┌────────┐   ┌──────────┐   ┌──────────┐
-│ Cockr  │   │ Bedrock  │   │    S3    │
-│ oachDB │   │ (LLM+Emb)│   │ (export) │
-└────────┘   └──────────┘   └──────────┘
+┌────────┐   ┌───────────┐   ┌──────────┐
+│ Cockr  │   │ OpenRouter│   │    S3    │
+│ oachDB │   │ (LLM+Emb) │   │ (export) │
+└────────┘   └───────────┘   └──────────┘
 ```
 
 ---
@@ -129,7 +129,7 @@ CockroachDB — bukan hanya localStorage / file-based storage.
 │   │   └── health.ts            # GET /health, /metrics
 │   └── lib/
 │       ├── crdb.ts              # CockroachDB client (pg Pool)
-│       ├── bedrock.ts           # Bedrock client (LLM + embeddings)
+│       ├── openrouter.ts        # OpenRouter client (LLM + embeddings)
 │       └── s3.ts                # S3 client (presigned URLs)
 │
 ├── schema/
@@ -195,7 +195,7 @@ terraform apply -var-file=environments/hackathon.tfvars
 
 ```bash
 curl https://YOUR_FUNCTION_URL/api/v1/health
-# Expected: {"status":"ok","crdb":"connected","bedrock":"available","s3":"available"}
+# Expected: {"status":"ok","crdb":"connected","llm":"available","s3":"available"}
 ```
 
 ### 6. Docker (opsional, full app)
@@ -231,9 +231,9 @@ docker compose up -d --build   # nginx:80, proxy /api/v1 ke Lambda
 - [x] CockroachDB sebagai persistent memory layer
 - [x] CockroachDB Cloud MCP Server (tool #1)
 - [x] Distributed Vector Indexing (tool #2)
-- [x] Amazon Bedrock (AWS service #1)
-- [x] AWS Lambda (AWS service #2)
-- [x] Amazon S3 (AWS service #3)
+- [x] OpenRouter LLM + embeddings (AWS-agnostic inference)
+- [x] AWS Lambda (AWS service #1)
+- [x] Amazon S3 (AWS service #2)
 - [ ] Functional Demo App URL (deploy frontend + backend)
 - [ ] Video Demo ≤3 menit (YouTube/Vimeo)
 - [x] Dokumentasi tools (README + docs/)
@@ -250,7 +250,7 @@ docker compose up -d --build   # nginx:80, proxy /api/v1 ke Lambda
 | P0 | Load testing (k6, 1000 concurrent users) | High |
 | P1 | Datadog/Grafana monitoring | Medium |
 | P1 | Automated backup + point-in-time recovery | Medium |
-| P1 | WebLLM on-device (ganti Bedrock fallback) | Medium |
+| P1 | WebLLM on-device (ganti OpenRouter fallback) | Medium |
 | P2 | Multi-tenant support | Low |
 | P2 | Custom domain + SSL | Low |
 | P2 | SOC 2 compliance audit | Low |

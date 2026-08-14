@@ -22,7 +22,6 @@ npx esbuild handler.ts \
   --format=cjs \
   --outfile=dist/index.js \
   --minify \
-  --external:pg \
   --external:aws-lambda
 
 echo ">> Creating $OUT_ZIP..."

@@ -55,6 +55,17 @@ resource "aws_ssm_parameter" "openrouter_daily_cap" {
   }
 }
 
+resource "aws_ssm_parameter" "openrouter_api_key" {
+  name        = "/${var.environment}/openrouter/api-key"
+  description = "OpenRouter API key"
+  type        = "SecureString"
+  value       = var.openrouter_api_key
+
+  tags = {
+    Name = "OpenRouter API Key"
+  }
+}
+
 # Generate random pepper if not provided
 resource "random_password" "pepper" {
   length  = 32

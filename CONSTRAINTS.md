@@ -47,8 +47,8 @@ Agent harus mampu:
 
 | Service | Status | Bukti |
 |---|---|---|
-| **Amazon Bedrock** | ✅ WAJIB | `lambda/lib/bedrock.ts` — Nova Micro + Titan Embed v2 |
-| **AWS Lambda** | ✅ WAJIB | `lambda/handler.ts` + `infra/serverless.yml` |
+| **OpenRouter** | ✅ WAJIB | `lambda/lib/openrouter.ts` — LLM (openrouter/free) + embeddings (bge-m3) |
+| **AWS Lambda** | ✅ WAJIB | `lambda/handler.ts` + `infra/` (Terraform) |
 | **Amazon S3** | ✅ WAJIB | `lambda/lib/s3.ts` — export storage |
 
 ### WAJIB: Artifacts
@@ -82,7 +82,7 @@ Agent harus mampu:
 - MCP Server integration
 - Cost control ($0 free tier protection)
 
-AWS deployment, Lambda, Bedrock, dll ada di folder `infra/` dan `lambda/`.
+AWS deployment, Lambda, S3, dll ada di folder `infra/` dan `lambda/`.
 
 ---
 
@@ -107,8 +107,8 @@ AWS deployment, Lambda, Bedrock, dll ada di folder `infra/` dan `lambda/`.
 
 | Service | Status | Bukti |
 |---|---|---|
-| **Amazon Bedrock** | ✅ WAJIB | `lambda/lib/bedrock.ts` (LLM + embeddings) |
-| **AWS Lambda** | ✅ WAJIB | `lambda/handler.ts` + `infra/serverless.yml` |
+| **OpenRouter** | ✅ WAJIB | `lambda/lib/openrouter.ts` (LLM + embeddings) |
+| **AWS Lambda** | ✅ WAJIB | `lambda/handler.ts` + `infra/` (Terraform) |
 | **Amazon S3** | ✅ WAJIB | `lambda/lib/s3.ts` (export storage) |
 
 ### 4. Submission Artifacts
@@ -141,7 +141,7 @@ AWS deployment, Lambda, Bedrock, dll ada di folder `infra/` dan `lambda/`.
 
 | Constraint | Target | Implementasi |
 |---|---|---|
-| **Health check** | /api/v1/health returns 200 | CRDB + Bedrock + S3 check |
+| **Health check** | /api/v1/health returns 200 | CRDB + LLM (OpenRouter) + S3 check |
 | **Error handling** | 5xx < 1% | Try/catch + graceful fallback |
 | **Timeout** | <30s per request | Lambda timeout 30s |
 | **Connection pooling** | Max 10 connections/pg | pg.Pool dengan idle timeout |
@@ -168,7 +168,7 @@ AWS deployment, Lambda, Bedrock, dll ada di folder `infra/` dan `lambda/`.
 | Load testing | Asumsi <100 users | k6 test 1000+ users | P0 |
 | Monitoring | CloudWatch logs | Datadog/Grafana | P1 |
 | Backup | CRDB automated | Point-in-time recovery | P1 |
-| On-device LLM | Bedrock only | WebLLM fallback | P1 |
+| On-device LLM | OpenRouter only | WebLLM fallback | P1 |
 
 ---
 

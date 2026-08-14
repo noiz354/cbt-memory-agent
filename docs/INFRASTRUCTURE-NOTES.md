@@ -23,37 +23,37 @@
 | Cost | **FREE** (runs in Lambda, tidak panggil API) |
 
 **Kenapa 384:**
-- ✅ Lebih murah (tidak perlu call Bedrock/Cohere untuk embeddings)
+- ✅ Lebih murah (tidak perlu call API embeddings)
 - ✅ Lebih cepat (ONNX local di Lambda, < 50ms per text)
 - ✅ Cukup untuk CBT context (tidak perlu 1024 dim untuk therapy summaries)
-- ✅ Tidak perlu AWS Secrets Manager (tidak ada API key untuk embedding model)
+- ✅ Tidak perlu API key untuk embedding model
 
 ### Backend Repo Ini: **VECTOR(1024)**
 
 | Item | Value |
 |---|---|
-| Model | Amazon Titan Embed Text v2 / Cohere embed-english-v3 |
+| Model | baai/bge-m3 via OpenRouter (free, 1024-dim) |
 | Dim | **1024** |
 | Metric | cosine via `embeddings_vector_idx` |
-| Cost | $0.02 per 1M tokens (Titan) atau $0.10 per 1M (Cohere) |
+| Cost | $0 (free tier) |
 
 **Kenapa 1024:**
-- ✅ Bedrock integration (hackathon requirement)
+- ✅ Sesuai schema VECTOR(1024) yang sudah deployed
+- ✅ bge-m3 gratis di OpenRouter
 - ✅ Higher accuracy untuk semantic search
-- ❌ Lebih mahal (perlu API call untuk setiap embedding)
-- ❌ Lebih lambat (network latency ke Bedrock)
+- ❌ Perlu API call untuk setiap embedding
 
 ---
 
 ## 🎯 KEPUTUSAN: Tetap VECTOR(1024) untuk Sekarang
 
 **Alasan:**
-1. **Hackathon requirement** — minimal 1 AWS service, Bedrock sudah di-plan
+1. **Sesuai schema** — schema dengan VECTOR(1024) sudah deployed
 2. **Sudah deployed** — schema dengan VECTOR(1024) sudah di cluster
 3. **Bisa migrate nanti** — downgrade ke 384 mudah, upgrade sulit
 
 **Kapan migrate ke 384:**
-- Setelah hackathon, jika cost Bedrock embeddings terlalu tinggi
+- Setelah hackathon, jika cost embeddings terlalu tinggi
 - Jika latency recall > 150ms (SLO dari frontend workspace)
 - Jika mau fully offline embeddings (ONNX di Lambda)
 
@@ -76,7 +76,7 @@
 **Parameters yang perlu:**
 ```
 /cbt/plane-c/pepper
-/cbt/openrouter/key         # atau /cbt/bedrock/access_key
+/cbt/openrouter/key  # API key LLM + embeddings (OpenRouter)
 /cbt/crdb/url              # postgres://cbt_app@…?sslmode=verify-full
 /cbt/openrouter/daily_cap  # 50 or 1000
 ```
@@ -119,8 +119,10 @@
 
 ### 5. OpenRouter vs Bedrock
 
-**Sekarang:** Amazon Bedrock (Nova Micro, Claude)  
-**Rekomendasi:** OpenRouter :free (20 RPM, 50 req/day free)
+**Keputusan (2026-08-14):** **OpenRouter** dipakai penuh — Bedrock dihapus total.
+
+**Sekarang:** OpenRouter (LLM chat + embeddings, AWS-agnostic)  
+**Alasan:** Bedrock TIDAK wajib untuk hackathon (cukup ≥1 AWS service; Lambda + S3 sudah cukup). OpenRouter :free menghilangkan biaya model.
 
 **Perbandingan:**
 
@@ -128,11 +130,11 @@
 |---|---|---|
 | Cost | $0.035/1M input tokens | **FREE** |
 | Setup | Perlu AWS credentials | API key only |
-| Models | Nova Micro, Claude, Titan | Llama 3.3 70B, Qwen3, dll |
+| Models | Nova Micro, Claude, Titan | openrouter/free router, bge-m3 embed |
 | Rate limit | Tinggi (pay-per-token) | 20 RPM, 50 req/day |
-| Fallback | Nova Lite | Next :free model |
+| Embeddings | Cohere/Titan (perlu enable model) | bge-m3 1024-dim gratis |
 
-**Action:** Tambahkan OpenRouter sebagai fallback option di `lambda/lib/bedrock.ts`
+**Implementasi:** `lambda/lib/openrouter.ts` (LLM: `openrouter/free`; embedding: `baai/bge-m3`); SSM `/hackathon/openrouter/api-key`.
 
 ### 6. ccloud-bootstrap.sh
 

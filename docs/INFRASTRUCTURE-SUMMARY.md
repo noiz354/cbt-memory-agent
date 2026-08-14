@@ -286,8 +286,8 @@ curl $FUNCTION_URL/health
 | Service | Status | Bukti |
 |---|---|---|
 | **AWS Lambda** | ✅ DONE | Function URL endpoint |
-| **Amazon Bedrock** | ⏳ TODO | Integration di Lambda handler |
-| **Amazon S3** | ⏳ TODO | Export bucket |
+| **OpenRouter** | ✅ DONE | LLM + embeddings di `lambda/lib/openrouter.ts` |
+| **Amazon S3** | ✅ DONE | Export bucket |
 
 ### Submission Artifacts
 
@@ -305,8 +305,8 @@ curl $FUNCTION_URL/health
 
 ### Yang HARUS Dikerjakan
 
-1. ⏳ **Lambda Handlers** — Implement 11 endpoint handlers
-2. ⏳ **Bedrock Integration** — Replace OpenRouter dengan Bedrock (optional)
+1. ⏳ **Lambda Handlers** — Verifikasi implementasi 11 endpoint handler
+2. ✅ **OpenRouter Integration** — LLM + embeddings via OpenRouter (ganti Bedrock, AWS-agnostic)
 3. ⏳ **Frontend Sync** — Set `VITE_API_URL` ke Function URL
 4. ⏳ **Testing** — Integration + contract tests
 5. ⏳ **Video Demo** — Record ≤ 3 menit → YouTube

@@ -5,13 +5,18 @@ variable "function_name" {
   type        = string
 }
 
+variable "role_arn" {
+  description = "IAM role ARN for Lambda execution"
+  type        = string
+}
+
 variable "environment" {
   description = "Environment name (used for SSM parameter paths)"
   type        = string
 }
 
 variable "aws_region" {
-  description = "AWS region for Bedrock"
+  description = "AWS region for Lambda deployment"
   type        = string
   default     = "us-east-1"
 }

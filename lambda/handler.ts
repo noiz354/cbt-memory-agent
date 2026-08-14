@@ -7,7 +7,7 @@
 
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
 import { CrdbClient } from "./lib/crdb";
-import { BedrockClient } from "./lib/bedrock";
+import { OpenRouterClient } from "./lib/openrouter";
 import { S3ClientService } from "./lib/s3";
 import { validateAuth } from "./middleware/auth";
 import { handleChatTurn } from "./handlers/chatTurn";
@@ -19,7 +19,7 @@ import { handlePurge } from "./handlers/purge";
 import { handleMetrics, handleHealth } from "./handlers/health";
 
 const crdb = new CrdbClient(process.env.CRDB_CONNECTION!);
-const bedrock = new BedrockClient(process.env.BEDROCK_REGION ?? "us-east-1");
+const llm = new OpenRouterClient();
 const s3 = new S3ClientService(process.env.S3_BUCKET ?? "cbt-memory-exports");
 
 export async function handler(
@@ -47,7 +47,7 @@ export async function handler(
   try {
     // Chat
     if (method === "POST" && path === "/api/v1/chat/turn") {
-      return await handleChatTurn(event, crdb, bedrock, token, deviceId);
+      return await handleChatTurn(event, crdb, llm, token, deviceId);
     }
 
     // Memory CRUD
@@ -63,7 +63,7 @@ export async function handler(
     }
     if (method === "GET" && path === "/api/v1/memory/semantic") {
       const qs = event.queryStringParameters || {};
-      return await handleSemanticSearch(qs, crdb, bedrock, token, deviceId);
+      return await handleSemanticSearch(qs, crdb, llm, token, deviceId);
     }
 
     // Sessions
@@ -92,7 +92,7 @@ export async function handler(
 
     // Health
     if (method === "GET" && path === "/api/v1/health") {
-      return await handleHealth(crdb, bedrock, s3);
+      return await handleHealth(crdb, llm, s3);
     }
 
     return notFound();

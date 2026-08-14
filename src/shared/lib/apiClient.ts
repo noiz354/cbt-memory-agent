@@ -3,7 +3,7 @@
  *
  * Frontend hanya memanggil endpoint ini. Backend bertanggung jawab atas:
  * - CockroachDB (persistent memory layer)
- * - Amazon Bedrock (LLM inference + embeddings)
+ * - OpenRouter (LLM inference + embeddings)
  * - AWS Lambda (API handler)
  * - Amazon S3 (export storage)
  * - Distributed Vector Indexing (semantic search)
@@ -133,7 +133,7 @@ export interface PurgeResponse {
 export interface HealthResponse {
   status: "ok" | "degraded" | "down";
   crdb: string;
-  bedrock: string;
+  llm: string;
   s3: string;
   version: string;
 }
@@ -144,7 +144,7 @@ export interface HealthResponse {
 
 export const apiClient = {
   /**
-   * POST /chat/turn — Simpan chat turn ke CockroachDB + LLM response via Bedrock.
+   * POST /chat/turn — Simpan chat turn ke CockroachDB + LLM response via OpenRouter.
    * Mendukung streaming SSE (jika response.body ada).
    */
   chatTurn: async (

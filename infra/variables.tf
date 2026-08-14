@@ -61,6 +61,12 @@ variable "openrouter_daily_cap" {
   default     = 50
 }
 
+variable "openrouter_api_key" {
+  description = "OpenRouter API key (sk-or-...)"
+  type        = string
+  sensitive   = true
+}
+
 variable "s3_bucket" {
   description = "S3 bucket for export bundles"
   type        = string

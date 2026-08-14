@@ -212,9 +212,9 @@ Setelah semua di atas done:
 |---|---|---|
 | CockroachDB Tool #1: MCP Server | ⏳ Pending | Setup via web UI |
 | CockroachDB Tool #2: Distributed Vector Indexing | ⏳ Pending | Verify setelah schema applied |
-| AWS Service #1: Lambda | ⏳ Pending | Deploy later |
-| AWS Service #2: Bedrock | ⏳ Pending | Integration later |
-| AWS Service #3: S3 | ⏳ Pending | Integration later |
+| AWS Service #1: Lambda | ✅ Done | Deployed (us-east-1) |
+| LLM + Embeddings: OpenRouter | ✅ Done | `lambda/lib/openrouter.ts` |
+| AWS Service #2: S3 | ✅ Done | Export bucket |
 | Public Repo + MIT License | ✅ Done | Repo ini |
 | README + Setup Instructions | ⏳ Pending | Update setelah semua done |
 | Video Demo (< 3 menit) | ⏳ Pending | Record setelah functional |

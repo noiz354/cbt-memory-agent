@@ -19,3 +19,8 @@ output "log_group_name" {
   description = "CloudWatch Log Group name"
   value       = aws_cloudwatch_log_group.lambda.name
 }
+
+output "exports_bucket" {
+  description = "S3 bucket name for export bundles"
+  value       = aws_s3_bucket.exports.bucket
+}

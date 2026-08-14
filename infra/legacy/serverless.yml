@@ -7,19 +7,12 @@ provider:
   stage: ${opt:stage, 'dev'}
   environment:
     CRDB_CONNECTION: ${ssm:/cbt-memory/crdb-connection~true}
-    BEDROCK_REGION: us-east-1
+    OPENROUTER_API_KEY: ${ssm:/cbt-memory/openrouter-api-key~true}
     S3_BUCKET: cbt-memory-exports-${self:provider.stage}
     ALLOWED_ORIGIN: ${self:custom.allowedOrigin}
   iam:
     role:
       statements:
-        - Effect: Allow
-          Action:
-            - bedrock:InvokeModel
-            - bedrock:InvokeModelWithResponseStream
-          Resource:
-            - arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-sonnet-4-20250514-v1:0
-            - arn:aws:bedrock:us-east-1::foundation-model/cohere.embed-english-v3
         - Effect: Allow
           Action:
             - s3:PutObject

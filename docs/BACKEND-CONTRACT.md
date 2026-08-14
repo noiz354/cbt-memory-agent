@@ -38,7 +38,7 @@
 │                    BACKEND (AWS + CockroachDB)                 │
 │                                                              │
 │  AWS Services (wajib ≥1):                                    │
-│    - Amazon Bedrock: LLM inference (Claude/GPT via proxy)    │
+│    - OpenRouter (API): LLM inference + embeddings            │
 │    - AWS Lambda: serverless API handler                      │
 │    - Amazon S3: export bundle storage                        │
 │                                                              │
@@ -117,7 +117,7 @@ Token didapat saat user complete auth di frontend. Backend memvalidasi token ter
 
 **POST** `/chat/turn`
 
-Simpan chat turn ke CockroachDB dan dapatkan response dari LLM (via Bedrock).
+Simpan chat turn ke CockroachDB dan dapatkan response dari LLM (via OpenRouter).
 
 **Request:**
 ```json
@@ -158,7 +158,7 @@ data: {"turnId": "turn_xyz", "tokensUsed": 245}
 1. Simpan user message ke `chat_turns` table
 2. Ambil memory nodes dari `memory_nodes` table (by IDs)
 3. Generate embedding dari user message → query `embeddings` table (vector index)
-4. Panggil Bedrock (Claude) dengan context: memory + vector results
+4. Panggil OpenRouter (LLM) dengan context: memory + vector results
 5. Simpan assistant response ke `chat_turns` table
 6. Update `memory_nodes.references` untuk nodes yang di-inject
 
@@ -292,7 +292,7 @@ atau untuk edge:
 ```
 
 **Backend melakukan:**
-1. Generate embedding dari query `q` via Bedrock `cohere.embed-english-v3`
+1. Generate embedding dari query `q` via OpenRouter `baai/bge-m3`
 2. Query `embeddings` table dengan `<=>` (pgvector cosine distance)
 3. JOIN dengan `memory_nodes` untuk ambil metadata
 4. Filter by `confidence >= minConfidence`
@@ -453,7 +453,7 @@ atau untuk edge:
 {
   "status": "ok",
   "crdb": "connected",
-  "bedrock": "available",
+  "llm": "available",
   "s3": "available",
   "version": "0.1.0"
 }
@@ -517,7 +517,7 @@ CREATE TABLE embeddings (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES users(id),
   node_id STRING NOT NULL REFERENCES memory_nodes(id),
-  embedding vector(1024), -- pgvector, dimension sesuai model Bedrock
+  embedding vector(1024), -- pgvector, dimension sesuai model embedding (baai/bge-m3)
   text_source STRING, -- excerpt, title, atau chat content
   created_at TIMESTAMPTZ DEFAULT now(),
   INDEX embeddings_user_idx (user_id),
@@ -587,11 +587,11 @@ CREATE TABLE audit_events (
 
 | Service | Peran | Di mana dipakai |
 |---|---|---|
-| **Amazon Bedrock** | LLM inference (Claude/GPT) + embeddings | POST `/chat/turn`, GET `/memory/semantic` |
+| **OpenRouter** | LLM inference (`openrouter/free`) + embeddings (`baai/bge-m3`) | POST `/chat/turn`, GET `/memory/semantic` |
 | **AWS Lambda** | Serverless API handler | Semua endpoint API |
 | **Amazon S3** | Export bundle storage | POST `/export` |
 
-**Minimal 1 yang dipakai:** Bedrock + Lambda + S3 ✅ (3 services)
+**Minimal 1 yang dipakai:** OpenRouter + Lambda + S3 ✅ (3 services)
 
 ---
 
@@ -613,7 +613,7 @@ CREATE TABLE audit_events (
 
 | Tugas | Endpoint |
 |---|---|
-| LLM inference via Bedrock | POST `/chat/turn` |
+| LLM inference via OpenRouter | POST `/chat/turn` |
 | Memory CRUD | GET/POST/DELETE `/memory` |
 | Semantic search (vector) | GET `/memory/semantic` |
 | Session CRUD | GET/POST `/sessions`, `/session` |
@@ -634,7 +634,7 @@ CREATE TABLE audit_events (
 | **Dokumentasi Tools** | ✅ | File ini + README |
 | **CockroachDB (wajib)** | ✅ | Persistent memory layer |
 | **CockroachDB Tools (≥2)** | ✅ | MCP Server + Distributed Vector Indexing |
-| **AWS Services (≥1)** | ✅ | Bedrock + Lambda + S3 |
+| **AWS Services (≥1)** | ✅ | OpenRouter + Lambda + S3 |
 
 ---
 
@@ -681,7 +681,7 @@ export const apiClient = {
 3. **Backend deploy** → `serverless deploy` atau `cdk deploy` → Lambda + API Gateway aktif
 4. **CockroachDB cluster** → `ccloud cluster create` → cluster running
 5. **Health check** → `GET /api/v1/health` → `{"status": "ok"}`
-6. **Chat turn** → `POST /api/v1/chat/turn` → streaming response dari Bedrock
+6. **Chat turn** → `POST /api/v1/chat/turn` → streaming response dari OpenRouter
 7. **Semantic search** → `GET /api/v1/memory/semantic?q=anxiety` → vector results
 8. **Export** → `POST /api/v1/export` → S3 presigned URL
 9. **Video demo** → rekam alur 1-8, ≤3 menit, upload ke YouTube

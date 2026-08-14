@@ -155,9 +155,9 @@ SSL Mode: verify-full
 |---|---|---|
 | CockroachDB Tool #1: MCP Server | ⏳ Pending | Setup via web UI |
 | CockroachDB Tool #2: Distributed Vector Indexing | ✅ **DONE** | embeddings_vector_idx |
-| AWS Service #1: Lambda | ⏳ Pending | Deploy later |
-| AWS Service #2: Bedrock | ⏳ Pending | Integration later |
-| AWS Service #3: S3 | ⏳ Pending | Integration later |
+| AWS Service #1: Lambda | ✅ Done | Deployed (us-east-1) |
+| LLM + Embeddings: OpenRouter | ✅ Done | `lambda/lib/openrouter.ts` |
+| AWS Service #2: S3 | ✅ Done | Export bucket |
 
 **Progress: 1/2 CockroachDB tools done (50%)**
 

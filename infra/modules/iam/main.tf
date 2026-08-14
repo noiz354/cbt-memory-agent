@@ -83,26 +83,6 @@ resource "aws_iam_role_policy" "cloudwatch_metrics" {
   })
 }
 
-# Amazon Bedrock Access (Claude + Cohere embeddings)
-resource "aws_iam_role_policy" "bedrock" {
-  name = "${var.function_name}-bedrock"
-  role = aws_iam_role.lambda_execution.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "bedrock:InvokeModel",
-          "bedrock:InvokeModelWithResponseStream"
-        ]
-        Resource = "arn:aws:bedrock:${var.aws_region}::foundation-model/*"
-      }
-    ]
-  })
-}
-
 # S3 Access (export bundles)
 resource "aws_iam_role_policy" "s3" {
   name = "${var.function_name}-s3"

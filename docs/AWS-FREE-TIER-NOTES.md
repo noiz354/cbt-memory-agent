@@ -111,11 +111,11 @@
 |---|---|---|
 | NAT Gateway | $0.045/hour = **$32/month** | Lambda tidak butuh NAT jika akses public endpoints |
 
-**Status:** ❌ **JANGAN BUAT** — Lambda bisa akses CockroachDB + Bedrock via public endpoint
+**Status:** ❌ **JANGAN BUAT** — Lambda bisa akses CockroachDB + OpenRouter via public endpoint
 
 **Solusi:**
 - Lambda → CockroachDB: Public endpoint (SSL verify-full)
-- Lambda → Bedrock: Public endpoint (AWS internal)
+- Lambda → OpenRouter: Public endpoint (HTTPS)
 - **Tidak perlu VPC** untuk hackathon
 
 ---

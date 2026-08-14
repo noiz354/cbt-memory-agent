@@ -23,14 +23,14 @@
 ┌─────────────────────────────────────────────┐
 │         BACKEND (AWS Lambda)                 │  ← Software Engineer (Backend)
 │  - API Gateway → Lambda handler              │
-│  - Route ke CRDB / Bedrock / S3              │
+│  - Route ke CRDB / OpenRouter / S3              │
 └───┬──────────┬───────────┬──────────────────┘
     │          │           │
     ▼          ▼           ▼
-┌────────┐ ┌────────┐ ┌────────┐
-│ Cockr  │ │ Bedrock│ │   S3   │
-│ oachDB │ │ (LLM)  │ │(export)│
-└───┬────┘ └───┬────┘ └───┬────┘
+┌────────┐ ┌────────────┐ ┌────────┐
+│ Cockr  │ │ OpenRouter │ │   S3   │
+│ oachDB │ │ (LLM+Emb)  │ │(export)│
+└───┬────┘ └───┬────────┘ └───┬────┘
     │          │           │
     ▼          ▼           ▼
  Database    ML/AI       Storage
@@ -187,14 +187,14 @@ CREATE TABLE audit_events (
 
 ---
 
-## 2. Machine Learning Engineer (Embeddings + Bedrock)
+## 2. Machine Learning Engineer (Embeddings + LLM)
 
 ### Tanggung Jawab
 
 | Item | Detail | File Referensi |
 |---|---|---|
-| **Amazon Bedrock** | Setup model access (Claude + embeddings) | `docs/BACKEND-CONTRACT.md` § AWS Services |
-| **Embedding Model** | `cohere.embed-english-v3` atau `amazon.titan-embed-text-v2` | GET `/memory/semantic` |
+| **LLM via OpenRouter** | LLM chat (`openrouter/free`) + embeddings (`baai/bge-m3`) | `docs/BACKEND-CONTRACT.md` § AWS Services |
+| **Embedding Model** | `baai/bge-m3` (1024-dim, free) via OpenRouter | GET `/memory/semantic` |
 | **Vector Pipeline** | Generate embedding → store ke CRDB → query cosine distance | Distributed Vector Indexing |
 | **Model Selection** | Pilih model terbaik untuk CBT context | Cost vs accuracy tradeoff |
 
@@ -202,22 +202,20 @@ CREATE TABLE audit_events (
 
 ```python
 # embedding_service.py — Lambda layer
-import boto3
-import json
+# (contoh pseudocode — implementasi aktual: lambda/lib/openrouter.ts di TS)
+import requests
 
-bedrock = boto3.client("bedrock-runtime", region_name="us-east-1")
+OPENROUTER_URL = "https://openrouter.ai/api/v1/embeddings"
+API_KEY = os.environ["OPENROUTER_API_KEY"]
 
 def generate_embedding(text: str) -> list[float]:
     """Generate 1024-dim embedding untuk semantic search."""
-    response = bedrock.invoke_model(
-        modelId="cohere.embed-english-v3",
-        body=json.dumps({
-            "texts": [text],
-            "input_type": "search_document",
-        }),
+    resp = requests.post(
+        OPENROUTER_URL,
+        headers={"Authorization": f"Bearer {API_KEY}"},
+        json={"model": "baai/bge-m3", "input": text},
     )
-    body = json.loads(response["body"].read())
-    return body["embeddings"][0]
+    return resp.json()["data"][0]["embedding"]
 
 def query_semantic(query: str, user_id: str, limit: int = 5, min_confidence: float = 0.6):
     """Query CRDB dengan vector similarity."""
@@ -231,14 +229,14 @@ def query_semantic(query: str, user_id: str, limit: int = 5, min_confidence: flo
 
 | Model | Dimensi | Cost/1K | Speed | CBT Suitability |
 |---|---|---|---|---|
-| cohere.embed-english-v3 | 1024 | $0.10 | Fast | ✅ Good for therapy context |
-| amazon.titan-embed-text-v2 | 1024 | $0.08 | Medium | ✅ AWS native |
-| Cohere.embed-multilingual-v3 | 1024 | $0.10 | Fast | ✅ Support ID language |
+| baai/bge-m3 | 1024 | FREE | Fast | ✅ Good for therapy context |
+| snowflake-arctic-embed-l | 1024 | paid | Fast | ✅ Free tier |
+| BAAI/bge-m3 (multilingual) | 1024 | FREE | Fast | ✅ Support ID language |
 
 ### Checklist Hackathon
 
-- [ ] Bedrock model access enabled (Claude + embeddings)
-- [ ] Embedding pipeline: text → vector → CRDB
+- [x] OpenRouter API key configured (SSM `/hackathon/openrouter/api-key`)
+- [x] Embedding pipeline: text → vector → CRDB
 - [ ] Semantic search working: query → vector → cosine distance → results
 - [ ] Cost monitoring setup
 
@@ -250,24 +248,26 @@ def query_semantic(query: str, user_id: str, limit: int = 5, min_confidence: flo
 
 | Item | Detail | File Referensi |
 |---|---|---|
-| **Bedrock LLM** | Claude (Sonnet/Haiku) untuk CBT response | POST `/chat/turn` |
+| **LLM (OpenRouter)** | `openrouter/free` untuk CBT response | POST `/chat/turn` |
 | **CockroachDB MCP Server** | AI agent query CRDB via MCP protocol | Wajib tool #1 |
 | **Prompt Engineering** | CBT system prompt + context injection | `src/shared/lib/llmClient.ts` (CBT_SYSTEM_PROMPT) |
-| **Streaming** | SSE response dari Bedrock | apiClient.ts streaming |
+| **Streaming** | SSE response dari OpenRouter | apiClient.ts streaming |
 | **Context Window** | Memory nodes + chat history → prompt | RAG pattern |
 
 ### Deliverables
 
 ```python
-# llm_handler.py — Lambda function untuk POST /chat/turn
-import boto3
+# llm_handler.py — Lambda function untuk POST /chat/turn (pseudocode)
+# Implementasi aktual: lambda/handlers/chatTurn.ts (TypeScript)
 import json
+import requests
 from crdb_client import get_crdb_connection
 
-bedrock = boto3.client("bedrock-runtime", region_name="us-east-1")
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+OPENROUTER_KEY = os.environ["OPENROUTER_API_KEY"]
 
 def handle_chat_turn(event):
-    """Process CBT chat turn via Bedrock + CRDB."""
+    """Process CBT chat turn via OpenRouter + CRDB."""
     body = json.loads(event["body"])
     user_id = event["headers"]["X-User-Id"]
     user_message = body["userMessage"]
@@ -293,14 +293,16 @@ def handle_chat_turn(event):
     # 3. Build prompt with context
     prompt = build_cbt_prompt(user_message, context_nodes, semantic_results)
 
-    # 4. Call Bedrock (Claude)
-    response = bedrock.invoke_model_with_response_stream(
-        modelId="anthropic.claude-sonnet-4-20250514-v1:0",
-        body=json.dumps({
-            "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": 2048,
+    # 4. Call OpenRouter (streaming)
+    response = requests.post(
+        OPENROUTER_URL,
+        headers={"Authorization": f"Bearer {OPENROUTER_KEY}"},
+        json={
+            "model": "openrouter/free",
             "messages": [{"role": "user", "content": prompt}],
-        }),
+            "stream": True,
+        },
+        stream=True,
     )
 
     # 5. Stream response back
@@ -325,10 +327,10 @@ suggest evidence-based reframes. Be warm, concise (200-400 words), collaborative
 
 ### Checklist Hackathon
 
-- [ ] Bedrock Claude model access enabled
-- [ ] MCP Server connected to CRDB cluster
-- [ ] CBT system prompt optimized (lihat `llmClient.ts`)
-- [ ] Streaming SSE working dari Bedrock → Lambda → Frontend
+- [x] OpenRouter API key configured (LLM + embeddings)
+- [x] MCP Server connected to CRDB cluster
+- [x] CBT system prompt optimized (lihat `llmClient.ts`)
+- [x] Streaming SSE working dari OpenRouter → Lambda → Frontend
 - [ ] Context window management: memory + chat history → prompt
 
 ---
@@ -351,12 +353,12 @@ suggest evidence-based reframes. Be warm, concise (200-400 words), collaborative
 // handler.ts — Lambda handler (TypeScript)
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
 import { CrdbClient } from "./crdb";
-import { BedrockClient } from "./bedrock";
-import { S3Client } from "./s3";
+import { OpenRouterClient } from "./openrouter";
+import { S3ClientService } from "./s3";
 
 const crdb = new CrdbClient(process.env.CRDB_CONNECTION);
-const bedrock = new BedrockClient();
-const s3 = new S3Client();
+const llm = new OpenRouterClient();
+const s3 = new S3ClientService(process.env.S3_BUCKET);
 
 export async function handler(
   event: APIGatewayProxyEvent,
@@ -374,7 +376,7 @@ export async function handler(
   // Route handling
   try {
     if (method === "POST" && path === "/api/v1/chat/turn") {
-      return await handleChatTurn(event, crdb, bedrock);
+      return await handleChatTurn(event, crdb, llm);
     }
     if (method === "GET" && path === "/api/v1/memory") {
       return await handleListMemory(event, crdb, token!, deviceId!);
@@ -387,7 +389,7 @@ export async function handler(
       return await handleDeleteMemory(event, crdb, id, token!, deviceId!);
     }
     if (method === "GET" && path === "/api/v1/memory/semantic") {
-      return await handleSemanticSearch(event, crdb, bedrock, token!, deviceId!);
+      return await handleSemanticSearch(event, crdb, llm, token!, deviceId!);
     }
     if (method === "POST" && path === "/api/v1/session") {
       return await handleSaveSession(event, crdb, token!, deviceId!);
@@ -405,7 +407,7 @@ export async function handler(
       return await handleMetrics(event, crdb, token!, deviceId!);
     }
     if (method === "GET" && path === "/api/v1/health") {
-      return await handleHealth(crdb, bedrock, s3);
+      return await handleHealth(crdb, llm, s3);
     }
 
     return { statusCode: 404, body: "Not found" };
@@ -419,25 +421,19 @@ export async function handler(
 }
 ```
 
-### Serverless Framework Config
+### Terraform Config
 
-```yaml
-# serverless.yml
-service: cbt-memory-agent
-
-provider:
-  name: aws
-  runtime: nodejs22.x
-  region: us-east-1
-  environment:
-    CRDB_CONNECTION: ${ssm:/cbt-memory/crdb-connection}
-    BEDROCK_REGION: us-east-1
-
-functions:
-  api:
-    handler: dist/handler.handler
-    events:
-      - httpApi:
+```hcl
+# infra/modules/lambda/main.tf (ringkas)
+environment {
+  variables = {
+    CRDB_CONNECTION  = data.aws_ssm_parameter.crdb_url.value
+    OPENROUTER_API_KEY = data.aws_ssm_parameter.openrouter_api_key.value
+    S3_BUCKET        = var.s3_bucket
+    ALLOWED_ORIGIN   = var.allowed_origin
+  }
+}
+```
           path: /api/v1/{proxy+}
           method: any
 ```
@@ -445,11 +441,11 @@ functions:
 ### Checklist Hackathon
 
 - [ ] 11 endpoint handlers implemented
-- [ ] API Gateway deployed dengan CORS
+- [ ] Lambda Function URL deployed dengan CORS
 - [ ] Auth middleware working (token + deviceId)
 - [ ] Error handling + retry logic
 - [ ] Lambda deployed ke AWS us-east-1
-- [ ] serverless.yml / CDK stack di repo
+- [ ] Terraform stack di repo
 
 ---
 
@@ -529,7 +525,7 @@ def setup_lifecycle():
 |---|---|---|
 | **Frontend Tests** | Vitest + React Testing Library | `src/**/*.test.ts` |
 | **API Contract Tests** | Validate request/response schema | `docs/BACKEND-CONTRACT.md` |
-| **Integration Tests** | Lambda → CRDB → Bedrock end-to-end | Hackathon demo flow |
+| **Integration Tests** | Lambda → CRDB → OpenRouter end-to-end | Hackathon demo flow |
 | **Performance Tests** | Latency < 2s untuk chat turn | SLA requirement |
 | **Security Tests** | Auth bypass, injection, XSS | Zero-cloud privacy |
 
@@ -577,7 +573,7 @@ describe("apiClient", () => {
 
 - [ ] Frontend unit tests: 80%+ coverage
 - [ ] API contract tests: all 11 endpoints
-- [ ] Integration test: chat → CRDB → Bedrock → response
+- [ ] Integration test: chat → CRDB → OpenRouter → response
 - [ ] Latency test: chat turn < 2s p95
 - [ ] Security scan: no XSS, no SQL injection
 
@@ -682,7 +678,7 @@ jobs:
 | **CockroachDB MCP Server** | AI Engineer + DB Engineer | ⏳ |
 | **Distributed Vector Indexing** | ML Engineer + DB Engineer | ⏳ |
 | **ccloud CLI** | DevOps + DB Engineer | ⏳ |
-| **Amazon Bedrock** | ML Engineer + AI Engineer | ⏳ |
+| **OpenRouter LLM** | AI Engineer | ✅ |
 | **AWS Lambda** | Backend Engineer | ⏳ |
 | **Amazon S3** | Storage Engineer | ⏳ |
 

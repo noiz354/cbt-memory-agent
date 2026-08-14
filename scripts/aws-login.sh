@@ -86,11 +86,23 @@ fi
 if check_session; then
   log_ok "Session AWS masih valid:"
   aws sts get-caller-identity
+  export_session_creds
   exit 0
 fi
 
 log_warn "Session AWS expired atau belum login."
 do_login "$remote"
+
+# ─── Export kredensial untuk tools yang memakai AWS SDK standar (Terraform dll) ──
+export_session_creds() {
+  if [[ -f scripts/aws-export-creds.sh ]]; then
+    log_info "Mengekspor kredensial sesi untuk Terraform (env vars)..."
+    # shellcheck disable=SC1091
+    if source scripts/aws-export-creds.sh "$AWS_PROFILE"; then
+      log_ok "Kredensial sementara diekspor. Gunakan 'source scripts/aws-login.sh' di shell aktif sebelum terraform apply."
+    fi
+  fi
+}
 
 echo ""
 if check_session; then
@@ -100,3 +112,4 @@ else
   log_error "Login gagal. Coba lagi dengan 'bash scripts/aws-login.sh --remote'."
   exit 1
 fi
+export_session_creds

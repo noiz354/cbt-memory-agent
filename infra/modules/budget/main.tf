@@ -5,47 +5,24 @@ resource "aws_budgets_budget" "hackathon" {
   budget_type       = "COST"
   limit_amount      = "1.00"  # $1 max budget
   limit_unit        = "USD"
-  time_period_start = "2026-08-13"
-  time_period_end   = "2026-08-31"
+  time_unit         = "MONTHLY"
+  time_period_start = "2026-08-13_00:00"
+  time_period_end   = "2026-08-31_23:59"
 
-  notification {
-    comparison_operator        = "GREATER_THAN"
-    threshold                  = 50
-    threshold_type             = "PERCENTAGE"
-    notification_type          = "ACTUAL"
-    subscriber_email_addresses = var.alert_emails
-  }
-
-  notification {
-    comparison_operator        = "GREATER_THAN"
-    threshold                  = 80
-    threshold_type             = "PERCENTAGE"
-    notification_type          = "ACTUAL"
-    subscriber_email_addresses = var.alert_emails
-  }
-
-  notification {
-    comparison_operator        = "GREATER_THAN"
-    threshold                  = 100
-    threshold_type             = "PERCENTAGE"
-    notification_type          = "ACTUAL"
-    subscriber_email_addresses = var.alert_emails
+  dynamic "notification" {
+    for_each = length(var.alert_emails) > 0 ? [50, 80, 100] : []
+    content {
+      comparison_operator        = "GREATER_THAN"
+      threshold                  = notification.value
+      threshold_type             = "PERCENTAGE"
+      notification_type          = "ACTUAL"
+      subscriber_email_addresses = var.alert_emails
+    }
   }
 
   tags = {
     Name = "Hackathon Budget"
   }
 }
-
-# Cost Anomaly Detection
-resource "aws_ce_anomaly_monitor" "hackathon" {
-  name              = "cbt-memory-agent-anomaly-monitor"
-  monitor_type      = "DIMENSIONAL"
-  monitor_dimension = "SERVICE"
-  monitor_specification {
-    tags {
-      key    = "Project"
-      values = ["cbt-memory-agent"]
-    }
-  }
-}
+# Note: aws_ce_anomaly_monitor dihapus — akun sudah punya "Default-Services-Monitor"
+# dan kuota dimensional spend monitor terbatas (error: Limit exceeded).

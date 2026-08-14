@@ -9,10 +9,14 @@ data "aws_ssm_parameter" "ccloud_api_key" {
   name = "/${var.environment}/ccloud/api-key"
 }
 
+data "aws_ssm_parameter" "openrouter_api_key" {
+  name = "/${var.environment}/openrouter/api-key"
+}
+
 resource "aws_lambda_function" "this" {
   function_name = var.function_name
   description   = "CBT Memory Agent API — CockroachDB x AWS Hackathon 2026"
-  role          = aws_iam_role.lambda_execution.arn
+  role          = var.role_arn
   handler       = "index.handler"
   runtime       = "nodejs22.x"
   memory_size   = var.memory_size
@@ -27,20 +31,42 @@ resource "aws_lambda_function" "this" {
 
   environment {
     variables = {
-      NODE_ENV       = "production"
-      CRDB_CONNECTION = data.aws_ssm_parameter.crdb_url.value
-      CCLOUD_API_KEY  = data.aws_ssm_parameter.ccloud_api_key.value
-      BEDROCK_REGION  = var.aws_region
-      S3_BUCKET       = var.s3_bucket
-      ALLOWED_ORIGIN  = var.allowed_origin
+      NODE_ENV          = "production"
+      CRDB_CONNECTION   = data.aws_ssm_parameter.crdb_url.value
+      CCLOUD_API_KEY    = data.aws_ssm_parameter.ccloud_api_key.value
+      OPENROUTER_API_KEY = data.aws_ssm_parameter.openrouter_api_key.value
+      S3_BUCKET         = var.s3_bucket
+      ALLOWED_ORIGIN    = var.allowed_origin
     }
   }
 
-  # No VPC — Lambda accesses public endpoints (CockroachDB, Bedrock)
+  # No VPC — Lambda accesses public endpoints (CockroachDB, OpenRouter)
   # This saves $32/month NAT Gateway cost
 
   tags = {
     Name = var.function_name
+  }
+}
+
+# S3 bucket for export bundles (referenced by IAM policy + Lambda health check)
+resource "aws_s3_bucket" "exports" {
+  bucket        = var.s3_bucket
+  force_destroy = true
+
+  lifecycle {
+    prevent_destroy = false
+  }
+
+  tags = {
+    Name = "CBT Memory Agent Exports"
+  }
+}
+
+resource "aws_s3_bucket_ownership_controls" "exports" {
+  bucket = aws_s3_bucket.exports.id
+
+  rule {
+    object_ownership = "BucketOwnerEnforced"
   }
 }
 
@@ -51,7 +77,7 @@ resource "aws_lambda_function_url" "this" {
 
   cors {
     allow_origins = ["*"]  # Restrict to frontend domain in production
-    allow_methods = ["GET", "POST", "DELETE", "OPTIONS"]
+    allow_methods = ["GET", "POST", "DELETE", "HEAD"]  # Max 6 chars per method (OPTIONS auto-handled)
     allow_headers = ["Content-Type", "Authorization", "X-Device-Id", "Idempotency-Key"]
     max_age       = 600
   }
