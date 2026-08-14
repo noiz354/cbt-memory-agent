@@ -53,7 +53,7 @@ log_ok "AWS credentials configured"
 
 # Check Lambda function exists
 FUNCTION_NAME="${LAMBDA_FUNCTION_NAME:-cbt-memory-agent}"
-AWS_REGION="${AWS_REGION:-us-east-1}"
+AWS_REGION="${AWS_REGION:-ap-southeast-3}"
 
 if ! aws lambda get-function --function-name "$FUNCTION_NAME" --region "$AWS_REGION" &>/dev/null; then
   log_warn "Lambda function '$FUNCTION_NAME' not found. Alarms will be created but may not trigger until function exists."

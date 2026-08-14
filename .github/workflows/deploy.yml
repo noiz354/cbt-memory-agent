@@ -51,6 +51,7 @@ jobs:
           TF_VAR_crdb_connection_url: ${{ secrets.CRDB_CONNECTION_URL }}
           TF_VAR_crdb_cluster_id: ${{ secrets.CRDB_CLUSTER_ID }}
           TF_VAR_ccloud_api_key: ${{ secrets.CCLOUD_API_KEY }}
+          TF_VAR_openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
           TF_VAR_allowed_origin: ${{ secrets.ALLOWED_ORIGIN }}
 
       - name: Health check

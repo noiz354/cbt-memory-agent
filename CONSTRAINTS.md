@@ -164,7 +164,7 @@ AWS deployment, Lambda, S3, dll ada di folder `infra/` dan `lambda/`.
 | Item | Sekarang | Production Fix | Timeline |
 |---|---|---|---|
 | Auth | Session token sederhana | OAuth2/OIDC + JWT | P0 |
-| Region | us-east-1 only | Multi-region (us + eu) | P0 |
+| Region | ap-southeast-3 only | Multi-region (ap-southeast-3 + us-east-1) | P0 |
 | Load testing | Asumsi <100 users | k6 test 1000+ users | P0 |
 | Monitoring | CloudWatch logs | Datadog/Grafana | P1 |
 | Backup | CRDB automated | Point-in-time recovery | P1 |

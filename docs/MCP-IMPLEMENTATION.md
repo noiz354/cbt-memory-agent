@@ -247,7 +247,7 @@ Setelah semua commands dijalankan, verifikasi:
 ```bash
 # 1. Cluster running
 ccloud cluster ls
-# Expected: woozy-grivet | aws us-east-1 | active
+# Expected: woozy-grivet | aws ap-southeast-3 | active
 
 # 2. MCP Server running
 ccloud mcp ls --cluster woozy-grivet

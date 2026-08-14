@@ -12,7 +12,7 @@ export class S3ClientService {
 
   constructor(bucket: string) {
     this.bucket = bucket;
-    this.client = new S3Client({ region: "us-east-1" });
+    this.client = new S3Client({ region: process.env.AWS_REGION ?? "ap-southeast-3" });
   }
 
   /**

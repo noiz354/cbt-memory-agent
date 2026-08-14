@@ -3,7 +3,7 @@
 # Copy this file to terraform.tfvars and fill in your values
 # DO NOT commit terraform.tfvars to git!
 
-# aws_region    = "us-east-1"
+# aws_region    = "ap-southeast-3"
 # environment   = "hackathon"
 # function_name = "cbt-memory-agent"
 # memory_size   = 256

@@ -3,7 +3,7 @@ service: cbt-memory-agent
 provider:
   name: aws
   runtime: nodejs22.x
-  region: us-east-1
+  region: ap-southeast-3
   stage: ${opt:stage, 'dev'}
   environment:
     CRDB_CONNECTION: ${ssm:/cbt-memory/crdb-connection~true}
@@ -25,7 +25,7 @@ provider:
           Action:
             - ssm:GetParameter
           Resource:
-            - arn:aws:ssm:us-east-1:${aws:accountId}:parameter/cbt-memory/*
+            - arn:aws:ssm:ap-southeast-3:${aws:accountId}:parameter/cbt-memory/*
 
 functions:
   api:

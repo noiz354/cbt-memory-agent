@@ -5,17 +5,17 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0"
+      version = "~> 6.0"
     }
   }
 
-  # Remote state (S3 + DynamoDB lock)
+  # Remote state (S3 + lockfile)
   backend "s3" {
-    bucket         = "cbt-memory-agent-terraform-state"
-    key            = "hackathon/terraform.tfstate"
-    region         = "us-east-1"
-    dynamodb_table = "cbt-memory-agent-terraform-lock"
-    encrypt        = true
+    bucket       = "cbt-memory-agent-terraform-state-apse3"
+    key          = "hackathon/terraform.tfstate"
+    region       = "ap-southeast-3"
+    use_lockfile = true
+    encrypt      = true
   }
 }
 

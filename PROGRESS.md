@@ -104,11 +104,11 @@
 - [x] Terraform v1.15.8 diinstal ke `~/bin`
 - [x] Bootstrap remote state: S3 `cbt-memory-agent-terraform-state` + DynamoDB lock table (manual, lalu di-import ke state)
 - [x] Fix infra: `role_arn` lambda module, S3 bucket `cbt-memory-exports` ditambahkan, outputs.tf root diperbaiki, budget module (time_unit/anomaly/notification conditional)
-- [x] Pilih region **us-east-1** (cohere.embed-english-v3 ada di sana; ap-southeast-3 cuma embed-v4)
+- [x] Pilih region **us-east-1** (awal; cohere.embed-english-v3 ada di sana; ap-southeast-3 cuma embed-v4) — **DIGANTI ap-southeast-3** setelah migrasi OpenRouter
 - [x] `terraform init` + `validate` + `plan` (23 resources) + `apply` — **SUKSES**
 - [x] Deployed: Lambda `cbt-memory-agent` (nodejs22.x), Function URL, S3 exports, log group 7-day, budget $1, 5 SSM params, IAM role
 - [x] Fix `--external:pg` → pg dibundle dalam zip (217KB) — perbaiki `Cannot find module 'pg'`
-- [x] Function URL: `https://armepcglafkj763liezd75etlm0sqals.lambda-url.us-east-1.on.aws/`
+- [x] Function URL (us-east-1): `https://armepcglafkj763liezd75etlm0sqals.lambda-url.us-east-1.on.aws/`
 - [x] `aws lambda invoke` → **200** `{"status":"ok","crdb":"connected","llm":"available","s3":"available","version":"0.1.0"}`
 - [ ] **TODO:** Akses publik URL masih 403 (`AccessDeniedException`) walau policy `FunctionURLAllowPublicAccess` benar — request diblokir di service layer (bukan handler); perlu investigasi lanjut
 - [ ] **TODO:** Setup GitHub remote + secrets untuk `.github/workflows/deploy.yml` (butuh static AWS keys, CRDB creds, dll)
@@ -130,3 +130,15 @@ Keputusan: LLM inference + embeddings dipindah total dari Amazon Bedrock ke Open
 - [x] **DEPLOY DONE**: build zip (207KB) + `terraform apply` (SSM `/hackathon/openrouter/api-key` + env `OPENROUTER_API_KEY`, bedrock policy dihapus)
 - [x] **Invoke test PASS**: health `{"status":"ok","crdb":"connected","llm":"available","s3":"available"}`; chat/turn → SSE stream CBT response (tokensUsed 606, chat_turns + sessions + users tersimpan di CRDB); semantic → `{"v":1,"results":[]}` (200, embeddings kosong — memory upsert masih stub)
 - [ ] **TODO:** Implement `handleUpsertMemory` (simpan node + embedding) agar semantic search punya data
+
+## Migrasi Region us-east-1 → ap-southeast-3 (2026-08-14)
+
+Keputusan: **semua resource AWS dipindah ke ap-southeast-3** agar Lambda berada dekat dengan cluster CRDB `woozy-grivet` (ap-southeast-3) — menghindari cross-region hop. Setelah migrasi OpenRouter (region-agnostic), tidak ada alasan lagi bertahan di us-east-1.
+
+- [ ] Bootstrap state infra baru di ap-southeast-3: S3 `cbt-memory-agent-terraform-state-apse3` + DynamoDB `cbt-memory-agent-terraform-lock-apse3`
+- [ ] Update backend.tf/main.tf + default region variables (ap-southeast-3)
+- [ ] `terraform init -migrate-state` → pindahkan state
+- [ ] Update `lambda/lib/s3.ts` (region-aware), scripts, CI deploy.yml, docs
+- [ ] `terraform apply` → destroy us-east-1, create ap-southeast-3
+- [ ] Verifikasi health/chat/semantic di region baru + recheck 403
+- [ ] Bersihkan resource us-east-1 yang ter-orphan

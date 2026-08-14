@@ -70,7 +70,7 @@ echo ""
 
 # ─── Configuration ───────────────────────────────────────────────────────────
 SSM_PREFIX="/cbt/hackathon"
-AWS_REGION="${AWS_REGION:-us-east-1}"
+AWS_REGION="${AWS_REGION:-ap-southeast-3}"
 
 log_info "SSM Prefix: $SSM_PREFIX"
 log_info "AWS Region: $AWS_REGION"

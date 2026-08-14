@@ -18,7 +18,7 @@ variable "environment" {
 variable "aws_region" {
   description = "AWS region for Lambda deployment"
   type        = string
-  default     = "us-east-1"
+  default     = "ap-southeast-3"
 }
 
 variable "s3_bucket" {

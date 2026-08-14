@@ -129,7 +129,7 @@
 **Status:** ❌ **JANGAN BUAT** — Pakai Lambda Function URL langsung (tidak perlu custom domain)
 
 **Solusi:**
-- Function URL: `https://xxxxxx.lambda-url.us-east-1.on.aws`
+- Function URL: `https://xxxxxx.lambda-url.ap-southeast-3.on.aws`
 - Frontend bisa call langsung (CORS enabled)
 
 ---
@@ -169,7 +169,7 @@ CbtApiLogGroup:
 | Double RU consumption | 2x CockroachDB usage |
 | Cross-region data transfer | $0.02/GB |
 
-**Status:** ❌ **JANGAN** — Single region (us-east-1) cukup untuk hackathon
+**Status:** ❌ **JANGAN** — Single region (ap-southeast-3) cukup untuk hackathon
 
 ---
 
@@ -255,7 +255,7 @@ CbtApiLogGroup:
 - [ ] TIDAK ada NAT Gateway ✅ (tidak ada di template)
 - [ ] TIDAK ada Route 53 ✅ (tidak ada di template)
 - [ ] TIDAK ada Elastic IP ✅ (tidak ada di template)
-- [ ] Single region (us-east-1) ✅ (sudah diset)
+- [ ] Single region (ap-southeast-3) ✅ (sudah diset)
 
 ---
 

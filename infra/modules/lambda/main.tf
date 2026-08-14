@@ -78,9 +78,22 @@ resource "aws_lambda_function_url" "this" {
   cors {
     allow_origins = ["*"]  # Restrict to frontend domain in production
     allow_methods = ["GET", "POST", "DELETE", "HEAD"]  # Max 6 chars per method (OPTIONS auto-handled)
-    allow_headers = ["Content-Type", "Authorization", "X-Device-Id", "Idempotency-Key"]
+    # Lowercase: AWS echoes these back lowercased — matching prevents a perpetual plan diff
+    allow_headers = ["authorization", "content-type", "x-device-id", "idempotency-key"]
     max_age       = 600
   }
+}
+
+# Since Oct 2025 AWS requires BOTH lambda:InvokeFunctionUrl AND lambda:InvokeFunction
+# permissions on the function's resource-based policy, even for NONE auth function URLs.
+# Without the second statement every invoke fails with 403 Forbidden / AccessDeniedException.
+# See: https://docs.aws.amazon.com/lambda/latest/dg/urls-auth.html
+resource "aws_lambda_permission" "function_url_invoke" {
+  action                   = "lambda:InvokeFunction"
+  function_name            = aws_lambda_function.this.function_name
+  principal                = "*"
+  statement_id             = "FunctionURLInvokeAllowPublicAccess"
+  invoked_via_function_url = true
 }
 
 # CloudWatch Log Group with 7-day retention (hackathon cost optimization)

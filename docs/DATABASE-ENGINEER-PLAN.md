@@ -89,14 +89,14 @@ brew install libpq
 
 ```bash
 #!/usr/bin/env bash
-# Provision CockroachDB Serverless cluster di AWS us-east-1
+# Provision CockroachDB Serverless cluster di AWS ap-southeast-3
 # Usage: bash scripts/01-provision-cluster.sh
 
 set -euo pipefail
 
 CLUSTER_NAME="woozy-grivet"
 CLOUD_PROVIDER="aws"
-REGION="us-east-1"
+REGION="ap-southeast-3"
 SPEND_LIMIT="0.00"  # WAJIB $0 untuk free tier hackathon
 
 echo "🪳 Creating CockroachDB Serverless cluster..."
@@ -648,7 +648,7 @@ Setelah semua script dijalankan, verifikasi:
 ```bash
 # 1. Cluster running
 ccloud cluster ls
-# Expected: woozy-grivet | aws us-east-1 | active
+# Expected: woozy-grivet | aws ap-southeast-3 | active
 
 # 2. MCP Server running
 ccloud mcp ls --cluster woozy-grivet

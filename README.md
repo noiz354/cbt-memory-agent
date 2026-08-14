@@ -245,7 +245,7 @@ docker compose up -d --build   # nginx:80, proxy /api/v1 ke Lambda
 
 | Phase | Item | Priority |
 |---|---|---|
-| P0 | Multi-region CRDB (us-east-1 + eu-west-1) | High |
+| P0 | Multi-region CRDB (ap-southeast-3 + us-east-1) | High |
 | P0 | OAuth2/OIDC auth (ganti session token) | High |
 | P0 | Load testing (k6, 1000 concurrent users) | High |
 | P1 | Datadog/Grafana monitoring | Medium |

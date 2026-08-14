@@ -56,7 +56,7 @@
 
 ```sql
 -- 1. Buat cluster
-ccloud cluster create --name cbt-memory --cloud aws --region us-east-1
+ccloud cluster create --name cbt-memory --cloud aws --region ap-southeast-3
 
 -- 2. Setup database
 ccloud sql --cluster cbt-memory -f schema.sql
@@ -444,7 +444,7 @@ environment {
 - [ ] Lambda Function URL deployed dengan CORS
 - [ ] Auth middleware working (token + deviceId)
 - [ ] Error handling + retry logic
-- [ ] Lambda deployed ke AWS us-east-1
+- [ ] Lambda deployed ke AWS ap-southeast-3
 - [ ] Terraform stack di repo
 
 ---
@@ -467,7 +467,7 @@ environment {
 import boto3
 from datetime import timedelta
 
-s3 = boto3.client("s3", region_name="us-east-1")
+s3 = boto3.client("s3", region_name="ap-southeast-3")
 BUCKET = "cbt-memory-exports"
 
 def upload_export(user_id: str, bundle: dict) -> str:

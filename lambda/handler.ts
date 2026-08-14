@@ -22,14 +22,30 @@ const crdb = new CrdbClient(process.env.CRDB_CONNECTION!);
 const llm = new OpenRouterClient();
 const s3 = new S3ClientService(process.env.S3_BUCKET ?? "cbt-memory-exports");
 
+// Lambda Function URLs / API Gateway HTTP API deliver payload v2.0 (rawPath,
+// requestContext.http.method, lowercased headers) — not the v1 fields (path, httpMethod).
+type HandlerEvent = APIGatewayProxyEvent & {
+  rawPath?: string;
+  rawQueryString?: string;
+  requestContext?: { http?: { method?: string } };
+};
+
 export async function handler(
-  event: APIGatewayProxyEvent,
+  event: HandlerEvent,
 ): Promise<APIGatewayProxyResult> {
-  const path = event.path;
-  const method = event.httpMethod;
-  const headers = event.headers || {};
-  const token = headers["Authorization"]?.replace("Bearer ", "") ?? "";
-  const deviceId = headers["X-Device-Id"] ?? "";
+  const path = event.rawPath ?? event.path ?? "";
+  const method = event.requestContext?.http?.method ?? event.httpMethod ?? "";
+
+  // v2.0 / Function URL events normalize header names to lowercase
+  const headers: Record<string, string> = {};
+  for (const [key, value] of Object.entries(event.headers ?? {})) {
+    headers[key.toLowerCase()] = value ?? "";
+  }
+
+  const token = headers["authorization"]?.replace(/^Bearer\s+/i, "") ?? "";
+  const deviceId = headers["x-device-id"] ?? "";
+  const queryStringParameters =
+    event.queryStringParameters ?? parseQueryString(event.rawQueryString ?? "");
 
   // Auth middleware — skip for health check
   if (path !== "/api/v1/health") {
@@ -62,7 +78,7 @@ export async function handler(
       return await handleDeleteMemory(id, crdb, token, deviceId);
     }
     if (method === "GET" && path === "/api/v1/memory/semantic") {
-      const qs = event.queryStringParameters || {};
+      const qs = queryStringParameters;
       return await handleSemanticSearch(qs, crdb, llm, token, deviceId);
     }
 
@@ -71,7 +87,7 @@ export async function handler(
       return await handleSaveSession(event, crdb, token, deviceId);
     }
     if (method === "GET" && path === "/api/v1/sessions") {
-      const qs = event.queryStringParameters || {};
+      const qs = queryStringParameters;
       return await handleListSessions(qs, crdb, token, deviceId);
     }
 
@@ -121,4 +137,15 @@ function notFound(): APIGatewayProxyResult {
     headers: corsHeaders(),
     body: JSON.stringify({ error: "Not found" }),
   };
+}
+
+function parseQueryString(raw: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!raw) return out;
+  for (const pair of raw.split("&")) {
+    if (!pair) continue;
+    const [key, value] = pair.split("=");
+    out[decodeURIComponent(key)] = decodeURIComponent(value ?? "");
+  }
+  return out;
 }

@@ -52,7 +52,7 @@ sudo mv terraform /usr/local/bin/
 
 ```bash
 aws configure
-# Input: AWS Access Key ID, Secret Access Key, region (us-east-1)
+# Input: AWS Access Key ID, Secret Access Key, region (ap-southeast-3)
 ```
 
 ### 3. Prepare Variables
@@ -70,7 +70,7 @@ nano terraform.tfvars
 **Isi terraform.tfvars:**
 
 ```hcl
-aws_region           = "us-east-1"
+aws_region           = "ap-southeast-3"
 environment          = "hackathon"
 function_name        = "cbt-memory-agent"
 memory_size          = 256
@@ -112,9 +112,9 @@ Setelah deploy, Terraform akan print:
 ```
 Outputs:
 
-function_url = "https://xxxxxx.lambda-url.us-east-1.on.aws"
+function_url = "https://xxxxxx.lambda-url.ap-southeast-3.on.aws"
 function_name = "cbt-memory-agent"
-function_arn = "arn:aws:lambda:us-east-1:123456789:function:cbt-memory-agent"
+function_arn = "arn:aws:lambda:ap-southeast-3:123456789:function:cbt-memory-agent"
 log_group_name = "/aws/lambda/cbt-memory-agent"
 ```
 
