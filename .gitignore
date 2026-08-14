@@ -1,0 +1,64 @@
+# Dependencies
+node_modules/
+.pnp/
+.pnp.js
+
+# Build output
+dist/
+dist-ssr/
+*.local
+.vite/
+.tsbuildinfo
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Debug
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Zip / archive
+*.zip
+*.tar.gz
+*.tar.xz
+
+# Extracted workspace
+workspace-extracted/
+
+# Memory (cross-project)
+.qwen/
+
+# Docker (if generated locally)
+*.log
+
+# ── Backend / Infra ─────────────────────────────
+# Terraform
+infra/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+
+# Serverless / SAM build artifacts
+lambda/dist/
+lambda/.serverless/
+lambda/.esbuild/
+
+# Local runtime
+cockroach-v26.2.5.linux-amd64/
+cockroach-data/

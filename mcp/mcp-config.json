@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "cockroachdb": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@anthropic-ai/mcp-server-cockroachdb"
+      ],
+      "env": {
+        "COCKROACH_DATABASE_URL": "${CRDB_CONNECTION}"
+      },
+      "disabled": false
+    }
+  }
+}

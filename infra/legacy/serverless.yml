@@ -1,0 +1,64 @@
+service: cbt-memory-agent
+
+provider:
+  name: aws
+  runtime: nodejs22.x
+  region: us-east-1
+  stage: ${opt:stage, 'dev'}
+  environment:
+    CRDB_CONNECTION: ${ssm:/cbt-memory/crdb-connection~true}
+    BEDROCK_REGION: us-east-1
+    S3_BUCKET: cbt-memory-exports-${self:provider.stage}
+    ALLOWED_ORIGIN: ${self:custom.allowedOrigin}
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - bedrock:InvokeModel
+            - bedrock:InvokeModelWithResponseStream
+          Resource:
+            - arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-sonnet-4-20250514-v1:0
+            - arn:aws:bedrock:us-east-1::foundation-model/cohere.embed-english-v3
+        - Effect: Allow
+          Action:
+            - s3:PutObject
+            - s3:GetObject
+            - s3:ListBucket
+          Resource:
+            - arn:aws:s3:::cbt-memory-exports-${self:provider.stage}
+            - arn:aws:s3:::cbt-memory-exports-${self:provider.stage}/*
+        - Effect: Allow
+          Action:
+            - ssm:GetParameter
+          Resource:
+            - arn:aws:ssm:us-east-1:${aws:accountId}:parameter/cbt-memory/*
+
+functions:
+  api:
+    handler: dist/handler.handler
+    timeout: 30
+    memorySize: 512
+    events:
+      - httpApi:
+          path: /api/v1/{proxy+}
+          method: any
+      - httpApi:
+          path: /api/v1/health
+          method: get
+    environment:
+      NODE_ENV: production
+
+custom:
+  allowedOrigin: ${env:ALLOWED_ORIGIN, '*'}
+  esbuild:
+    bundle: true
+    minify: true
+    target: node22
+    sourcemap: true
+    external:
+      - pg
+      - aws-lambda
+
+plugins:
+  - serverless-esbuild

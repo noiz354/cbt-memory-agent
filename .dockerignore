@@ -1,0 +1,28 @@
+# Source — only needed at build stage inside Docker
+node_modules
+dist
+.vite
+
+# Local dev & tooling
+*.md
+.qwen
+workspace-extracted
+workspace-*.zip
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env (build args if needed)
+.env
+.env.*

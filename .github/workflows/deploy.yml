@@ -1,0 +1,59 @@
+name: Deploy Backend
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'lambda/**'
+      - 'infra/**'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: lambda/package-lock.json
+
+      - name: Typecheck (lambda)
+        working-directory: lambda
+        run: |
+          npm ci
+          npx tsc --noEmit
+
+      - name: Build Lambda zip
+        run: bash scripts/build-lambda.sh
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform init
+        working-directory: infra
+        run: terraform init
+
+      - name: Terraform apply
+        working-directory: infra
+        run: terraform apply -auto-approve
+        env:
+          TF_VAR_aws_region: ${{ secrets.AWS_REGION }}
+          TF_VAR_crdb_connection_url: ${{ secrets.CRDB_CONNECTION_URL }}
+          TF_VAR_crdb_cluster_id: ${{ secrets.CRDB_CLUSTER_ID }}
+          TF_VAR_ccloud_api_key: ${{ secrets.CCLOUD_API_KEY }}
+          TF_VAR_allowed_origin: ${{ secrets.ALLOWED_ORIGIN }}
+
+      - name: Health check
+        run: |
+          sleep 30
+          curl -f ${{ secrets.API_URL }}/api/v1/health || exit 1

@@ -1,0 +1,130 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  CBT Memory Agent — Lambda Function URL + SSM + CloudWatch
+  CockroachDB × AWS Hackathon 2026
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 256
+    Runtime: nodejs22.x
+    Environment:
+      Variables:
+        NODE_ENV: production
+        CRDB_URL: !Sub 'ssm:/cbt/hackathon/crdb/connection-url~true'
+        CRDB_CLUSTER_ID: !Sub 'ssm:/cbt/hackathon/crdb/cluster-id~true'
+        CCLOUD_API_KEY: !Sub 'ssm:/cbt/hackathon/ccloud/api-key~true'
+        APP_PEPPER: !Sub 'ssm:/cbt/hackathon/app/pepper~true'
+        OPENROUTER_DAILY_CAP: !Sub 'ssm:/cbt/hackathon/app/openrouter-daily-cap'
+
+Resources:
+  # ─── Lambda Function ─────────────────────────────────────────────────────
+  CbtApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: cbt-memory-agent
+      Description: CBT Memory Agent API — Hackathon 2026
+      CodeUri: ../lambda/
+      Handler: dist/handler.handler
+      Architectures:
+        - x86_64
+      Environment:
+        Variables:
+          NODE_ENV: production
+          CRDB_URL: !Sub 'ssm:/cbt/hackathon/crdb/connection-url~true'
+          CRDB_CLUSTER_ID: !Sub 'ssm:/cbt/hackathon/crdb/cluster-id~true'
+          CCLOUD_API_KEY: !Sub 'ssm:/cbt/hackathon/ccloud/api-key~true'
+          APP_PEPPER: !Sub 'ssm:/cbt/hackathon/app/pepper~true'
+          OPENROUTER_DAILY_CAP: !Sub 'ssm:/cbt/hackathon/app/openrouter-daily-cap'
+      Policies:
+        - SSMParameterReadPolicy:
+            ParameterName: /cbt/hackathon/crdb/connection-url
+        - SSMParameterReadPolicy:
+            ParameterName: /cbt/hackathon/crdb/cluster-id
+        - SSMParameterReadPolicy:
+            ParameterName: /cbt/hackathon/ccloud/api-key
+        - SSMParameterReadPolicy:
+            ParameterName: /cbt/hackathon/app/pepper
+        - SSMParameterReadPolicy:
+            ParameterName: /cbt/hackathon/app/openrouter-daily-cap
+        - CloudWatchPutMetricPolicy: {}
+      Events:
+        FunctionUrl:
+          Type: FunctionUrl
+          Properties:
+            AuthType: NONE  # Demo only — add auth for production
+            Cors:
+              AllowOrigins:
+                - '*'  # Restrict to frontend domain in production
+              AllowMethods:
+                - GET
+                - POST
+                - DELETE
+                - OPTIONS
+              AllowHeaders:
+                - Content-Type
+                - Authorization
+                - X-User-Id
+                - X-Tenant-Id
+                - Idempotency-Key
+              MaxAge: 600
+
+  # ─── CloudWatch Alarms ───────────────────────────────────────────────────
+  LambdaErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: CBT-LambdaErrors
+      AlarmDescription: Lambda 5xx error rate > 1%
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref CbtApiFunction
+
+  LambdaDurationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: CBT-LambdaDuration
+      AlarmDescription: Lambda duration > 25s (approaching 30s timeout)
+      MetricName: Duration
+      Namespace: AWS/Lambda
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 25000
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref CbtApiFunction
+
+  # ─── Log Group ───────────────────────────────────────────────────────────
+  CbtApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${CbtApiFunction}'
+      RetentionInDays: 7  # Hackathon — keep short to save cost
+
+Outputs:
+  FunctionUrl:
+    Description: Lambda Function URL endpoint
+    Value: !GetAtt CbtApiFunctionUrl.FunctionUrl
+    Export:
+      Name: CbtApiFunctionUrl
+
+  FunctionName:
+    Description: Lambda function name
+    Value: !Ref CbtApiFunction
+    Export:
+      Name: CbtApiFunctionName
+
+  FunctionArn:
+    Description: Lambda function ARN
+    Value: !GetAtt CbtApiFunction.Arn
+    Export:
+      Name: CbtApiFunctionArn
