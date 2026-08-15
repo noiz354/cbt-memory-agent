@@ -52,3 +52,14 @@ module "budget" {
 
   depends_on = [module.lambda]
 }
+
+# EventBridge — agentic memory reflection cron (tiap 6 jam)
+module "eventbridge" {
+  source = "./modules/eventbridge"
+
+  function_name        = var.function_name
+  lambda_function_arn  = module.lambda.function_arn
+  lambda_function_name = module.lambda.function_name
+
+  depends_on = [module.lambda]
+}

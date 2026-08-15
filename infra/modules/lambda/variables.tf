@@ -40,9 +40,9 @@ variable "memory_size" {
 }
 
 variable "timeout" {
-  description = "Lambda timeout in seconds"
+  description = "Lambda timeout in seconds (reflection cron needs >29s for LLM + embeddings)"
   type        = number
-  default     = 29
+  default     = 300
 }
 
 variable "email_from" {

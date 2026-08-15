@@ -44,11 +44,8 @@ import { handleTelemetryRelay } from "./handlers/telemetry";
 import { handleRequestMagicLink, handleConsumeMagicLink } from "./handlers/auth";
 import { handleTrackEvents } from "./handlers/events";
 import { handleMonetizationCac, handleMonetizationSummary } from "./handlers/monetization";
-import {
-  handleAnalyticsFunnel,
-  handleAnalyticsActivity,
-  handleAnalyticsRetention,
-} from "./handlers/analytics";
+import { handleAnalyticsFunnel, handleAnalyticsActivity, handleAnalyticsRetention } from "./handlers/analytics";
+import { handleReflect } from "./handlers/reflect";
 
 const crdb = new CrdbClient(process.env.CRDB_CONNECTION!);
 const llm = new OpenRouterClient();
@@ -63,11 +60,46 @@ type HandlerEvent = APIGatewayProxyEvent & {
   rawPath?: string;
   rawQueryString?: string;
   requestContext?: { http?: { method?: string } };
+  source?: string;
+  "detail-type"?: string;
 };
 
 export async function handler(
   event: HandlerEvent,
 ): Promise<APIGatewayProxyResult> {
+  // EventBridge scheduled event (agentic memory reflection cron) — bukan API Gateway.
+  const isScheduledEvent =
+    event.source === "agent.memory" && event["detail-type"] === "reflect";
+
+  if (isScheduledEvent) {
+    const parentCtx = extractTraceContext({});
+    const [rootSpan, rootCtx] = startSpan("agent.memory.reflect", parentCtx, {
+      attributes: { "agent.job": "reflect" },
+    });
+    try {
+      const result = await handleReflect(crdb, llm, rootCtx);
+      return {
+        statusCode: 200,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(result),
+      };
+    } catch (err) {
+      logger.error("reflection.handler_failed", "Reflection handler error", {
+        err: err instanceof Error ? err.message : String(err),
+      });
+      rootSpan.recordException(err instanceof Error ? err : new Error(String(err)));
+      rootSpan.setStatus({ code: SpanStatusCode.ERROR });
+      return {
+        statusCode: 500,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ error: "Reflection failed" }),
+      };
+    } finally {
+      rootSpan.end();
+      await flushTelemetry();
+    }
+  }
+
   const path = event.rawPath ?? event.path ?? "";
   const method = event.requestContext?.http?.method ?? event.httpMethod ?? "";
 

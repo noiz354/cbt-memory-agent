@@ -97,13 +97,22 @@ describe("HTTP trace contract (static)", () => {
     return HANDLER_SRC.slice(from, to);
   }
 
-  it("handler() applies finalizeResponse to every response path", () => {
+  it("handler() applies finalizeResponse to every HTTP response path", () => {
     const handlerBody = bodyBetween("export async function handler", "interface RouteContext");
-    // Tidak ada `return` di handler() yang melewati finalizeResponse.
-    const bareReturns = handlerBody.match(/return\s+(?!finalizeResponse\()/g) ?? [];
+    // Branch EventBridge (scheduled reflection job) bukan HTTP request, jadi tidak
+    // melalui finalizeResponse — scan dibatasi ke jalur HTTP mulai dari routing.
+    const httpBody = handlerBody.slice(handlerBody.indexOf("const path = event.rawPath"));
+    const bareReturns = httpBody.match(/return\s+(?!finalizeResponse\()/g) ?? [];
     expect(bareReturns).toEqual([]);
-    const finalizeCalls = handlerBody.match(/finalizeResponse\(/g) ?? [];
+    const finalizeCalls = httpBody.match(/finalizeResponse\(/g) ?? [];
     expect(finalizeCalls.length).toBeGreaterThanOrEqual(2); // sukses + catch 500
+  });
+
+  it("handler() keeps the EventBridge scheduled reflection branch", () => {
+    const handlerBody = bodyBetween("export async function handler", "interface RouteContext");
+    expect(handlerBody).toContain('event.source === "agent.memory"');
+    expect(handlerBody).toContain('event["detail-type"] === "reflect"');
+    expect(handlerBody).toContain("handleReflect");
   });
 
   it("every route branch delegates to a handler (no inline bypass)", () => {

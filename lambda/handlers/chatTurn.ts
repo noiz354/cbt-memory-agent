@@ -79,7 +79,7 @@ export async function handleChatTurn(
     const userId = await upsertUser(crdb, token);
 
     // 3. Memory context (span semantik bisnis; span db.query dibuat oleh wrapper crdb)
-    const { rows: memories, mode, embeddingMs, keywordMs, failed } = await withSpan(
+    const { rows: memories, mode, embeddingMs, keywordMs, failed, recalledTitles } = await withSpan(
       "agent.memory.retrieve",
       rootCtx,
       async (span) => {
@@ -87,6 +87,7 @@ export async function handleChatTurn(
         span.setAttribute("memory.ids_requested", body.memoryIds?.length ?? 0);
         span.setAttribute("memory.results", res.rows.length);
         span.setAttribute("memory.mode", res.mode);
+        span.setAttribute("memory.recalled_titles", res.recalledTitles.join(" | "));
         if (res.embeddingMs !== undefined) span.setAttribute("memory.embedding_ms", res.embeddingMs);
         if (res.keywordMs !== undefined) span.setAttribute("memory.keyword_ms", res.keywordMs);
         if (res.failed) span.setAttribute("memory.failed", true);
@@ -157,7 +158,10 @@ export async function handleChatTurn(
       fullContent
         .split("\n")
         .map((line) => "data: " + JSON.stringify({ t: line }) + "\n\n")
-        .join("") + "data: [DONE]\n\n";
+        .join("") +
+      "data: " +
+      JSON.stringify({ t: "", injectedMemoryIds: memories.map((m) => m.id) }) +
+      "\n\ndata: [DONE]\n\n";
 
     return {
       statusCode: 200,
@@ -201,6 +205,8 @@ export interface MemoryRetrievalResult {
   embeddingMs?: number;
   keywordMs?: number;
   failed?: boolean;
+  /** Judul memory yang berhasil di-recall (untuk span `memory.recalled_titles` + SSE). */
+  recalledTitles: string[];
 }
 
 /**
@@ -232,7 +238,11 @@ export async function getMemoryContext(
   );
 
   if (memoryIds.length > 0) {
-    return { rows: heuristicRows, mode: "heuristic" };
+    return {
+      rows: heuristicRows,
+      mode: "heuristic",
+      recalledTitles: heuristicRows.map((r) => r.title),
+    };
   }
 
   const startedAt = Date.now();
@@ -243,7 +253,13 @@ export async function getMemoryContext(
     logger.warn("chat.embedding_failed", "Query embedding failed — heuristic fallback", {
       err: err instanceof Error ? err.message : String(err),
     });
-    return { rows: heuristicRows, mode: "heuristic", embeddingMs: Date.now() - startedAt, failed: true };
+    return {
+      rows: heuristicRows,
+      mode: "heuristic",
+      embeddingMs: Date.now() - startedAt,
+      failed: true,
+      recalledTitles: heuristicRows.map((r) => r.title),
+    };
   }
   const embeddingMs = Date.now() - startedAt;
 
@@ -278,11 +294,13 @@ export async function getMemoryContext(
     [toVectorLiteral(embedding), userId],
   );
 
+  const fused = reciprocalRankFusion<MemoryContext>([heuristicRows, keywordRows, vectorRows], 60, 8);
   return {
-    rows: reciprocalRankFusion<MemoryContext>([heuristicRows, keywordRows, vectorRows], 60, 8),
+    rows: fused,
     mode: "hybrid",
     embeddingMs,
     keywordMs,
+    recalledTitles: fused.map((r) => r.title),
   };
 }
 

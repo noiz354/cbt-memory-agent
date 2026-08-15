@@ -175,6 +175,59 @@ export class OpenRouterClient {
     return { content, tokensUsed };
   }
 
+  /**
+   * Chat non-streaming — return `{ content, tokensUsed }` lengkap.
+   * Dipakai untuk tugas batch (mis. reflection/agentic memory) yang butuh
+   * seluruh respons sekaligus, bukan streaming.
+   */
+  async chat(messages: ChatMessage[], opts: { maxTokens?: number } = {}): Promise<ChatResult> {
+    const tracer = trace.getTracer("cbt-memory-agent-backend", "0.1.0");
+    const parentCtx = context.active();
+    const span = tracer.startSpan("llm.openrouter", { attributes: {} }, parentCtx);
+    const startedAt = Date.now();
+
+    span.setAttribute(ATTR_GEN_AI_SYSTEM, "openrouter");
+    span.setAttribute(ATTR_GEN_AI_OPERATION_NAME, "chat");
+    span.setAttribute("gen_ai.request.model", CHAT_MODEL);
+
+    try {
+      const res = await context.with(trace.setSpan(parentCtx, span), async () => {
+        const resp = await fetch(`${BASE_URL}/chat/completions`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${this.apiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: CHAT_MODEL,
+            messages,
+            stream: false,
+            max_tokens: opts.maxTokens ?? 1024,
+          }),
+        });
+
+        if (!resp.ok) {
+          const text = await resp.text().catch(() => "");
+          throw new Error(`OpenRouter chat: HTTP ${resp.status} — ${text.slice(0, 200)}`);
+        }
+
+        const data = (await resp.json()) as {
+          choices?: { message?: { content?: string } }[];
+          usage?: { total_tokens?: number };
+        };
+        const content = data.choices?.[0]?.message?.content ?? "";
+        return { content, tokensUsed: data.usage?.total_tokens ?? 0 };
+      });
+      return res;
+    } catch (err) {
+      span.recordException(err instanceof Error ? err : new Error(String(err)));
+      throw err;
+    } finally {
+      span.end();
+      recordGenAiOperation("chat", Date.now() - startedAt);
+    }
+  }
+
   /** Health check — verifikasi API key valid + service reachable. */
   async healthCheck(): Promise<boolean> {
     try {
