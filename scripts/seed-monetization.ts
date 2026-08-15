@@ -1,18 +1,21 @@
 /**
- * Seed Monetization (FASE 4) — dummy data untuk dashboard + verifikasi.
+ * Seed Monetization + Analytics (FASE 4 + FASE 1-3) — dummy data demo.
  *
- * Mengisi ~6 bulan data demo deterministik:
+ * Mengisi ~6 bulan data deterministik:
  *   - marketing_ad_spend  : Google / Meta / TikTok / Organic (harian)
  *   - subscriptions       : langganan naik bulan demi bulan + churn + upgrade
- *   - user_events         : funnel checkout, payment, cancel, downgrade
- *   - users               : ~45 akun dummy (id = md5(email)::uuid)
+ *   - user_events         : funnel checkout/payment (FASE 4) + telemetry
+ *                           aktivasi (FASE 1-3: signup/onboarding/chat/finalize)
+ *                           + aktivitas bulanan per cohort (retensi)
+ *   - users               : ~45 akun dummy (id = md5(email)::uuid),
+ *                           created_at di-backdate ke bulan join (anchor cohort)
  *
  * Run:  npx tsx scripts/seed-monetization.ts
  * Env : CRDB_CONNECTION_URL (dari .env)
  *
  * CATATAN:
- *   - Script DEV/mock → menghapus isi 3 tabel monetisasi dulu (wipe) supaya
- *     idempoten saat dijalankan ulang. Tidak menyentuh data users non-seed.
+ *   - Script DEV/mock → wipe tabel monetisasi + hapus akun seed-* (CASCADE)
+ *     supaya idempoten saat dijalankan ulang. Tidak menyentuh users non-seed.
  *   - Jangan dipakai di produksi.
  */
 
@@ -94,29 +97,65 @@ async function main(): Promise<void> {
   const rand = mulberry32(0x0c0ffee);
   const now = new Date();
 
-  // ── 1) Wipe tabel monetisasi (idempotent dev seed) ────────────────────────
+  const JOIN_WEIGHTS = [3, 4, 5, 6, 7, 8]; // Mar..Aug 2026 — cohort awal lebih besar
+  const RETENTION_CURVE = [1, 0.8, 0.65, 0.5, 0.4, 0.32]; // retensi per bulan setelah join
+
+  // ── 1) Wipe tabel (idempotent dev seed) ────────────────────────────────────
   for (const table of ["user_events", "subscriptions", "marketing_ad_spend"]) {
     await pool.query(`DELETE FROM ${table}`);
   }
+  // Hapus akun seed (CASCADE membersihkan event + subscription terkait).
+  await pool.query(`DELETE FROM users WHERE email LIKE 'seed-%@example.com'`);
 
-  // ── 2) Users dummy (~45) ──────────────────────────────────────────────────
+  // ── 2) Users dummy (~45) — created_at di-backdate ke bulan join ───────────
+  // created_at = anchor cohort retention (getRetention memakai bulan created_at).
   const userEmails: string[] = [];
   for (let i = 0; i < 45; i++) {
     userEmails.push(`seed-user-${String(i + 1).padStart(2, "0")}@example.com`);
   }
-  const userRows = userEmails.map((email) => ({
-    id: md5Uuid(email),
-    email,
-    lastActive: "",
-  }));
+  const totalWeight = JOIN_WEIGHTS.reduce((a, b) => a + b, 0);
+  const userRows: { id: string; email: string; joinIso: string; lastActive: string }[] = [];
+  for (const email of userEmails) {
+    const r = rand() * totalWeight;
+    let acc = 0;
+    let joinMonthIdx = 0;
+    for (let j = 0; j < JOIN_WEIGHTS.length; j++) {
+      acc += JOIN_WEIGHTS[j];
+      if (r < acc) {
+        joinMonthIdx = j;
+        break;
+      }
+    }
+    const joinDate = new Date(Date.UTC(2026, 2 + joinMonthIdx, 1 + Math.floor(rand() * 26)));
+    const joinIso = joinDate.toISOString();
+    userRows.push({ id: md5Uuid(email), email, joinIso, lastActive: joinIso });
+  }
   for (const u of userRows) {
     await pool.query(
-      `INSERT INTO users (id, email, display_name, auth_method)
-       VALUES ($1, $2, $3, 'passkey')
+      `INSERT INTO users (id, email, display_name, auth_method, created_at)
+       VALUES ($1, $2, $3, 'passkey', $4::timestamptz)
        ON CONFLICT (id) DO NOTHING`,
-      [u.id, u.email, u.email.split("@")[0]],
+      [u.id, u.email, u.email.split("@")[0], u.joinIso],
     );
   }
+
+  let evCount = 0;
+
+  // Helper insert event (dipakai untuk telemetry/funnel/aktivitas FASE 1-3).
+  const insertEvent = async (
+    userId: string,
+    name: string,
+    props: Record<string, unknown> | null,
+    at: string,
+    suffix: string | number,
+  ): Promise<void> => {
+    await pool.query(
+      `INSERT INTO user_events (user_id, event_name, event_properties, session_id, device_id, occurred_at)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [userId, name, props ? JSON.stringify(props) : null, `seed-${suffix}`, `device-${suffix}`, at],
+    );
+    evCount++;
+  };
 
   // ── 3) marketing_ad_spend (6 bulan, harian per channel) ───────────────────
   const months: Date[] = [];
@@ -149,15 +188,30 @@ async function main(): Promise<void> {
 
   // ── 4) subscriptions + user_events (funnel / payment / churn / upgrade) ───
   let subCount = 0;
-  let evCount = 0;
+  const funnelDrop = { signup: 0, onboarding: 0, message: 0, finalized: 0 };
   for (let uIdx = 0; uIdx < userEmails.length; uIdx++) {
-    const userId = userRows[uIdx].id;
-    // Join month 0..5, sebagian besar di awal-awal, sebagian baru baru.
-    const joinMonth = Math.floor(rand() * 6); // 0..5
-    const joinDate = new Date(Date.UTC(2026, 2 + joinMonth, 1 + Math.floor(rand() * 26)));
-    const joinIso = joinDate.toISOString();
+    const uRow = userRows[uIdx];
+    const userId = uRow.id;
+    const joinIso = uRow.joinIso;
     if (joinIso > now.toISOString()) continue;
-    userRows[uIdx].lastActive = joinIso;
+    uRow.lastActive = joinIso;
+
+    // 0. Telemetry aktivasi (FASE 1-3): signup → onboarding → chat → finalize.
+    // Drop-off per tahap: onboarding ~15%, message_sent ~18%, finalized ~21%.
+    funnelDrop.signup++;
+    await insertEvent(userId, "signup_completed", null, joinIso, uIdx);
+    if (rand() < 0.85) {
+      funnelDrop.onboarding++;
+      await insertEvent(userId, "onboarding_completed", null, minutesFrom(joinIso, 2 + Math.floor(rand() * 8)), uIdx);
+    }
+    if (rand() < 0.7) {
+      funnelDrop.message++;
+      await insertEvent(userId, "message_sent", { topic: "seed" }, minutesFrom(joinIso, 30 + Math.floor(rand() * 300)), uIdx);
+    }
+    if (rand() < 0.55) {
+      funnelDrop.finalized++;
+      await insertEvent(userId, "session_finalized", null, minutesFrom(joinIso, 1440 + Math.floor(rand() * 1440)), uIdx);
+    }
 
     const plan = PLANS[rand() < 0.55 ? 1 : rand() < 0.5 ? 0 : 2]; // bias pro
     const yearly = rand() < 0.12;
@@ -278,18 +332,48 @@ async function main(): Promise<void> {
     evCount++;
   }
 
-  // ── 6) Ringkasan ──────────────────────────────────────────────────────────
+  // ── 6) Aktivitas bulanan per cohort (retensi: decay realistis) ───────────
+  // Tiap user aktif di bulan join; bulan berikutnya aktif dengan probabilitas
+  // mengikuti RETENTION_CURVE. page_view per bulan → DAU/WAU/MAU + retention.
   for (const u of userRows) {
-    if (!u.lastActive) continue;
+    const join = new Date(u.joinIso);
+    if (join.getTime() > now.getTime()) continue;
+    let active = true;
+    for (let m = 0; m < RETENTION_CURVE.length && active; m++) {
+      if (m > 0 && rand() >= RETENTION_CURVE[m]) active = false; // dropout
+      if (!active) break;
+      const monthStart = new Date(Date.UTC(join.getUTCFullYear(), join.getUTCMonth() + m, 1));
+      if (monthStart.getTime() > now.getTime()) break;
+      const isCurrent = monthStart.getUTCFullYear() === now.getUTCFullYear() && monthStart.getUTCMonth() === now.getUTCMonth();
+      const daysInMonth = new Date(Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth() + 1, 0)).getDate();
+      const lastDay = isCurrent ? Math.min(now.getUTCDate(), daysInMonth) : daysInMonth;
+      const visits = 1 + Math.floor(rand() * 2);
+      for (let v = 0; v < visits; v++) {
+        const day = 1 + Math.floor(rand() * lastDay);
+        const at = new Date(Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth(), day));
+        if (at.getTime() > now.getTime()) continue;
+        await insertEvent(u.id, "page_view", { path: "/chat" }, at.toISOString(), `act-${u.id.slice(0, 6)}`);
+        u.lastActive = at.toISOString();
+      }
+    }
+  }
+
+  // ── 7) Ringkasan ──────────────────────────────────────────────────────────
+  let seededUsers = 0;
+  for (const u of userRows) {
+    if (u.joinIso > now.toISOString()) continue;
+    seededUsers++;
     await pool.query(`UPDATE users SET last_active = $1 WHERE id = $2`, [u.lastActive, u.id]);
   }
   await pool.end();
 
   console.log("──────────────────────────────────────────────────");
-  console.log("Seed monetisasi selesai (deterministik)");
-  console.log(`  users             : ${userEmails.length}`);
+  console.log("Seed monetisasi + analytics selesai (deterministik)");
+  console.log(`  users             : ${seededUsers}`);
   console.log(`  subscriptions     : ${subCount}`);
   console.log(`  user_events       : ${evCount}`);
+  console.log("  funnel aktivasi   :");
+  console.log(`    signup → ${funnelDrop.signup} | onboarding → ${funnelDrop.onboarding} | message → ${funnelDrop.message} | finalized → ${funnelDrop.finalized}`);
   console.log("  ad spend / bulan  :");
   for (const [k, v] of adSpend) {
     console.log(`    ${k} → $${v.toFixed(2)}`);

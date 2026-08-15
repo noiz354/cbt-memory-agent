@@ -89,25 +89,27 @@ else
   echo "  ✗ datasource gagal:"; echo "$DS_RESP"; exit 1
 fi
 
-# 2) Import dashboard
-DASHBOARD_PATH="$ROOT/infra/grafana/monetization-dashboard.json"
-DASH_PAYLOAD=$(node -e '
-  const fs = require("fs");
-  const d = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-  process.stdout.write(JSON.stringify({ dashboard: d, overwrite: true }));
-' "$DASHBOARD_PATH")
+# 2) Import semua dashboard (monetization + analytics + ...)
+for DASHBOARD_PATH in "$ROOT"/infra/grafana/*.json; do
+  [ -f "$DASHBOARD_PATH" ] || continue
+  DASH_PAYLOAD=$(node -e '
+    const fs = require("fs");
+    const d = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+    process.stdout.write(JSON.stringify({ dashboard: d, overwrite: true }));
+  ' "$DASHBOARD_PATH")
 
-DASH_RESP=$(curl -sS -X POST "${GRAFANA_URL}/api/dashboards/db" \
-  -H "Authorization: Bearer ${GRAFANA_API_KEY}" \
-  -H "Content-Type: application/json" \
-  -d "$DASH_PAYLOAD")
+  DASH_RESP=$(curl -sS -X POST "${GRAFANA_URL}/api/dashboards/db" \
+    -H "Authorization: Bearer ${GRAFANA_API_KEY}" \
+    -H "Content-Type: application/json" \
+    -d "$DASH_PAYLOAD")
 
-if echo "$DASH_RESP" | grep -q '"status":"success"'; then
-  URL=$(echo "$DASH_RESP" | node -e 'process.stdin.on("data",d=>{try{console.log(JSON.parse(d).url||"")}catch{}} )')
-  echo "  ✓ dashboard diimport → ${GRAFANA_URL}${URL}"
-else
-  echo "  ✗ dashboard gagal:"; echo "$DASH_RESP"; exit 1
-fi
+  if echo "$DASH_RESP" | grep -q '"status":"success"'; then
+    URL=$(echo "$DASH_RESP" | node -e 'process.stdin.on("data",d=>{try{console.log(JSON.parse(d).url||"")}catch{}} )')
+    echo "  ✓ dashboard diimport → ${GRAFANA_URL}${URL}"
+  else
+    echo "  ✗ dashboard gagal (${DASHBOARD_PATH}):"; echo "$DASH_RESP"; exit 1
+  fi
+done
 
 echo "──────────────────────────────────────────────────────"
-echo "Selesai. Buka dashboard di Grafana → dashboards → Monetization."
+echo "Selesai. Buka dashboard di Grafana → dashboards → Monetization & Analytics."

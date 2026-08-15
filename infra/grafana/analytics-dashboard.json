@@ -1,0 +1,200 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "description": "Analytics FASE 1-3 — aktivasi funnel, DAU/WAU/MAU, cohort retention & sticky factor. Datasource: CockroachDB (uid crdb-postgres).",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "links": [],
+  "panels": [
+    {
+      "datasource": { "type": "postgres", "uid": "crdb-postgres" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "fillOpacity": 40, "lineWidth": 1, "stacking": { "mode": "none", "group": "A" } },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "displayMode": "gradient",
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": false },
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": true },
+        "showUnfilled": true,
+        "text": { "valueSize": 16 },
+        "tooltip": { "mode": "single", "sort": "none" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "crdb-postgres" },
+          "format": "table",
+          "group": [],
+          "rawSql": "SELECT COUNT(DISTINCT CASE WHEN event_name = 'signup_completed' THEN user_id END)::int AS signup_completed,\n       COUNT(DISTINCT CASE WHEN event_name = 'onboarding_completed' THEN user_id END)::int AS onboarding_completed,\n       COUNT(DISTINCT CASE WHEN event_name = 'message_sent' THEN user_id END)::int AS message_sent,\n       COUNT(DISTINCT CASE WHEN event_name = 'session_finalized' THEN user_id END)::int AS session_finalized\nFROM user_events\nWHERE $__timeFilter(occurred_at);",
+          "refId": "A"
+        }
+      ],
+      "title": "Activation Funnel — Users per Step",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "crdb-postgres" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 60 }, { "color": "red", "value": 40 }] },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 6, "x": 6, "y": 0 },
+      "id": 2,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": true },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "crdb-postgres" },
+          "format": "table",
+          "group": [],
+          "rawSql": "SELECT\n  (COUNT(DISTINCT CASE WHEN event_name = 'onboarding_completed' THEN user_id END))::numeric\n    / NULLIF(COUNT(DISTINCT CASE WHEN event_name = 'signup_completed' THEN user_id END), 0) * 100 AS signup_to_onboarding_pct,\n  (COUNT(DISTINCT CASE WHEN event_name = 'message_sent' THEN user_id END))::numeric\n    / NULLIF(COUNT(DISTINCT CASE WHEN event_name = 'onboarding_completed' THEN user_id END), 0) * 100 AS onboarding_to_chat_pct,\n  (COUNT(DISTINCT CASE WHEN event_name = 'session_finalized' THEN user_id END))::numeric\n    / NULLIF(COUNT(DISTINCT CASE WHEN event_name = 'message_sent' THEN user_id END), 0) * 100 AS chat_to_finalized_pct\nFROM user_events\nWHERE $__timeFilter(occurred_at);",
+          "refId": "A"
+        }
+      ],
+      "title": "Activation Conversion",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "crdb-postgres" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "fillOpacity": 40, "lineWidth": 1, "stacking": { "mode": "none", "group": "A" } },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 8 },
+      "id": 3,
+      "options": {
+        "legend": { "calcs": ["lastNotNull", "sum"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "crdb-postgres" },
+          "format": "time_series",
+          "group": [],
+          "rawSql": "SELECT date_trunc('day', occurred_at)::date AS \"time\", COUNT(*)::int AS value\nFROM ( SELECT user_id, occurred_at FROM user_events WHERE $__timeFilter(occurred_at)\n       UNION SELECT id, last_active FROM users WHERE $__timeFilter(last_active) ) AS act\nGROUP BY 1 ORDER BY 1;",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "postgres", "uid": "crdb-postgres" },
+          "format": "time_series",
+          "group": [],
+          "rawSql": "SELECT date_trunc('week', occurred_at)::date AS \"time\", COUNT(*)::int AS value\nFROM ( SELECT user_id, occurred_at FROM user_events WHERE $__timeFilter(occurred_at)\n       UNION SELECT id, last_active FROM users WHERE $__timeFilter(last_active) ) AS act\nGROUP BY 1 ORDER BY 1;",
+          "refId": "B"
+        },
+        {
+          "datasource": { "type": "postgres", "uid": "crdb-postgres" },
+          "format": "time_series",
+          "group": [],
+          "rawSql": "SELECT date_trunc('month', occurred_at)::date AS \"time\", COUNT(*)::int AS value\nFROM ( SELECT user_id, occurred_at FROM user_events WHERE $__timeFilter(occurred_at)\n       UNION SELECT id, last_active FROM users WHERE $__timeFilter(last_active) ) AS act\nGROUP BY 1 ORDER BY 1;",
+          "refId": "C"
+        }
+      ],
+      "title": "Activity — DAU / WAU / MAU",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "crdb-postgres" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "yellow", "value": 10 }, { "color": "green", "value": 20 }] },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 8 },
+      "id": 4,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "crdb-postgres" },
+          "format": "table",
+          "group": [],
+          "rawSql": "SELECT\n  (SELECT COUNT(*) FROM ( SELECT user_id FROM user_events WHERE $__timeFilter(occurred_at)\n    UNION SELECT id FROM users WHERE $__timeFilter(last_active) ) AS act)::numeric\n  / NULLIF((SELECT COUNT(*) FROM ( SELECT id FROM users WHERE last_active >= $__timeFrom()::timestamptz AND last_active <= $__timeTo()::timestamptz\n    UNION SELECT DISTINCT user_id FROM user_events WHERE $__timeFilter(occurred_at) ) AS act), 0) * 100 AS sticky_factor;",
+          "refId": "A"
+        }
+      ],
+      "title": "Sticky Factor (DAU/MAU)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "crdb-postgres" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "custom": { "align": "auto", "cellOptions": { "type": "auto" }, "inspect": false },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "yellow", "value": 30 }, { "color": "green", "value": 50 }] },
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "retention_pct" },
+            "properties": [
+              { "id": "unit", "value": "percent" },
+              { "id": "custom.cellOptions", "value": { "type": "color-background" } }
+            ]
+          }
+        ]
+      },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 18 },
+      "id": 5,
+      "options": { "showHeader": true },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "crdb-postgres" },
+          "format": "table",
+          "group": [],
+          "rawSql": "WITH cohorts AS (\n  SELECT id, date_trunc('month', created_at)::date AS cohort FROM users WHERE $__timeFilter(created_at)\n), sizes AS (\n  SELECT cohort, COUNT(*)::int AS size FROM cohorts GROUP BY cohort\n), activity AS (\n  SELECT user_id, date_trunc('month', occurred_at)::date AS active_month FROM user_events WHERE $__timeFilter(occurred_at)\n  UNION SELECT id, date_trunc('month', last_active)::date FROM users WHERE $__timeFilter(last_active)\n), matched AS (\n  SELECT s.cohort, s.size, c.id AS user_id,\n         (EXTRACT(YEAR FROM act.active_month) * 12 + EXTRACT(MONTH FROM act.active_month)\n          - EXTRACT(YEAR FROM s.cohort) * 12 - EXTRACT(MONTH FROM s.cohort))::int AS age\n  FROM sizes s\n  JOIN cohorts c ON c.cohort = s.cohort\n  LEFT JOIN activity act ON act.user_id = c.id AND act.active_month >= s.cohort\n  WHERE act.active_month IS NOT NULL\n)\nSELECT cohort::text AS cohort, age, size,\n       COUNT(DISTINCT user_id)::int AS active,\n       (COUNT(DISTINCT user_id)::numeric / NULLIF(size, 0) * 100)::numeric::text AS retention_pct\nFROM matched\nGROUP BY cohort, age, size\nORDER BY cohort, age;",
+          "refId": "A"
+        }
+      ],
+      "title": "Cohort Retention — % Active by Age (months)",
+      "type": "table"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 40,
+  "tags": ["analytics", "fase123"],
+  "templating": { "list": [] },
+  "time": { "from": "now-6M", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Analytics — Funnel · Activity · Retention",
+  "uid": "analytics",
+  "version": 1
+}
