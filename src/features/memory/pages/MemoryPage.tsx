@@ -2,6 +2,7 @@ import { GraphCanvas } from "@/features/memory/components/GraphCanvas";
 import { useMemoryStore } from "@/features/memory/store/memoryStore";
 import { apiClient, type SemanticSearchResult } from "@/shared/lib/apiClient";
 import { getAuthHeaders } from "@/shared/lib/authSession";
+import { track, TELEMETRY_EVENTS } from "@/shared/lib/telemetryEvents";
 import { BackendSyncStatus } from "@/shared/ui/BackendSyncStatus";
 import { Search, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -32,6 +33,7 @@ export function MemoryPage() {
       setResults([]);
       return;
     }
+    track(TELEMETRY_EVENTS.memorySearched);
     const auth = getAuthHeaders();
     setSearching(true);
     apiClient

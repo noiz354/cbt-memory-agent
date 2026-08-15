@@ -3,6 +3,8 @@ import { uid } from "@/shared/lib/format";
 import { createVersionedPersist } from "@/shared/lib/versionedPersist";
 import { apiClient } from "@/shared/lib/apiClient";
 import { getAuthHeaders } from "@/shared/lib/authSession";
+import { track, TELEMETRY_EVENTS } from "@/shared/lib/telemetryEvents";
+import { metric } from "@/shared/lib/metrics";
 import type { SessionStatus, MoodLabel } from "@/shared/types";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
@@ -150,6 +152,14 @@ export const useSessionStore = create<SessionState>()(
           sessions: s.sessions.map((session) => (session.id === id ? { ...session, status } : session)),
         }));
 
+        if (status === "extracted") {
+          track(TELEMETRY_EVENTS.sessionFinalized);
+          metric.sessionFinalized();
+        } else if (status === "interrupted") {
+          track(TELEMETRY_EVENTS.sessionInterrupted);
+          metric.sessionOrphaned();
+        }
+
         // Persist status change to backend (POST /session upserts by id).
         const updated = get().sessions.find((s) => s.id === id);
         const auth = getAuthHeaders();
@@ -193,6 +203,7 @@ export const useSessionStore = create<SessionState>()(
             session.status === "interrupted" ? { ...session, status: "pending" } : session,
           ),
         }));
+        if (interrupted.length > 0) metric.sessionRequeueOk();
         return interrupted.length;
       },
       wipe: () => set({ sessions: [], highlightedId: null, compare: null }),

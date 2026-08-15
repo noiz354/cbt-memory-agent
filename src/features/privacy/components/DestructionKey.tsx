@@ -1,6 +1,7 @@
 import { hardPurgeLocalData } from "@/features/privacy/lib/hardPurge";
 import { cn } from "@/shared/lib/cn";
 import { springDropAnimation } from "@/shared/lib/dnd";
+import { metric } from "@/shared/lib/metrics";
 import {
   DndContext,
   DragOverlay,
@@ -12,7 +13,7 @@ import {
   useSensors,
 } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 const SLOT = "drop-destroy-slot";
@@ -98,12 +99,14 @@ export function DestructionKey() {
   const navigate = useNavigate();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
   const timer = useState<{ raf: number | null; start: number }>({ raf: null, start: 0 })[0];
+  const purgedRef = useRef(false);
 
   const stopHold = () => {
     setHolding(false);
     setProgress(0);
     if (timer.raf) cancelAnimationFrame(timer.raf);
     timer.raf = null;
+    if (!purgedRef.current) metric.purgeAbandon();
   };
 
   const startHold = () => {
@@ -113,6 +116,7 @@ export function DestructionKey() {
       const ratio = Math.min(1, (now - timer.start) / HOLD_MS);
       setProgress(ratio);
       if (ratio >= 1) {
+        purgedRef.current = true;
         void hardPurgeLocalData().finally(() => navigate("/auth"));
         return;
       }

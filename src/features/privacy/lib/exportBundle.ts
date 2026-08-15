@@ -7,6 +7,7 @@ import { useAuditStore } from "@/shared/store/auditStore";
 import { apiClient } from "@/shared/lib/apiClient";
 import { getAuthHeaders } from "@/shared/lib/authSession";
 import { metric } from "@/shared/lib/metrics";
+import { track, TELEMETRY_EVENTS } from "@/shared/lib/telemetryEvents";
 
 export function buildExportBundle(kinds: ExportKind[]) {
   const profile = useAuthStore.getState().profile;
@@ -61,6 +62,7 @@ export function downloadJson(data: unknown, filename: string) {
   a.click();
   URL.revokeObjectURL(url);
   metric.exportSuccess();
+  track(TELEMETRY_EVENTS.exportCompleted);
 }
 
 /**
@@ -74,6 +76,7 @@ export async function uploadExportBundle(kinds: ExportKind[]): Promise<string | 
   try {
     const response = await apiClient.exportBundle(kinds, auth.token, auth.deviceId);
     metric.exportSuccess();
+    track(TELEMETRY_EVENTS.exportCompleted);
     return response.s3Url;
   } catch (err) {
     console.warn("[API] Failed to upload export bundle to S3:", err);

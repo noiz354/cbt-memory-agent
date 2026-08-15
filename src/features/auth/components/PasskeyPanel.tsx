@@ -1,5 +1,6 @@
 import { mintLocalDeviceKey, mintPasskey, platformPasskeyAvailable } from "@/features/auth/lib/passkey";
 import { useAuthStore } from "@/features/auth/store/authStore";
+import { track, TELEMETRY_EVENTS } from "@/shared/lib/telemetryEvents";
 import { Button } from "@/shared/ui/Button";
 import { AnimatePresence, motion } from "framer-motion";
 import { Fingerprint, LoaderCircle, ShieldCheck } from "lucide-react";
@@ -31,6 +32,7 @@ export function PasskeyPanel({ email, displayName }: PasskeyPanelProps) {
       method: "passkey",
       credentialId,
     });
+    track(TELEMETRY_EVENTS.signupCompleted, { method: "passkey" });
     setPhase("done");
     setNote(methodNote);
     window.setTimeout(() => navigate("/onboarding"), 700);

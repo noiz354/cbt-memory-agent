@@ -9,6 +9,9 @@
  */
 
 import { CrdbClient } from "./crdb";
+import { isAllowedEventName, partitionEvents } from "./eventCatalog";
+
+export { isAllowedEventName, partitionEvents };
 
 // ─────────────────────────────────────────────
 // Event allowlist (monetisasi + funnel)
@@ -71,24 +74,6 @@ export function validateEventsPayload(body: unknown): ValidatedEvents {
   return { ok: true, events: events as IncomingEvent[] };
 }
 
-/** Pisahkan events sesuai allowlist. Event non-allowlist TIDAK di-insert. */
-export function partitionEvents(
-  events: IncomingEvent[],
-): { valid: IncomingEvent[]; rejected: IncomingEvent[] } {
-  const allowed = new Set<string>(ALLOWED_MONETIZATION_EVENTS);
-  const valid: IncomingEvent[] = [];
-  const rejected: IncomingEvent[] = [];
-  for (const ev of events) {
-    if (allowed.has(ev.name)) valid.push(ev);
-    else rejected.push(ev);
-  }
-  return { valid, rejected };
-}
-
-export function isAllowedEventName(name: string): boolean {
-  return (ALLOWED_MONETIZATION_EVENTS as readonly string[]).includes(name);
-}
-
 // ─────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────
@@ -100,19 +85,19 @@ export function monthBounds(period: string): { start: Date; end: Date } {
   return { start, end };
 }
 
-function toNum(value: unknown): number {
+export function toNum(value: unknown): number {
   if (value === null || value === undefined || value === "") return 0;
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
 }
 
-function safeDiv(numerator: number, denominator: number): number | null {
+export function safeDiv(numerator: number, denominator: number): number | null {
   if (!Number.isFinite(numerator)) return null;
   if (denominator === 0) return null;
   return numerator / denominator;
 }
 
-function round2(n: number | null): number | null {
+export function round2(n: number | null): number | null {
   return n === null ? null : Math.round(n * 100) / 100;
 }
 

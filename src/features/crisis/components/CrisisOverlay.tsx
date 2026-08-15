@@ -5,6 +5,8 @@ import { CalmingAudio } from "@/features/crisis/components/CalmingAudio";
 import { SwipeToCall } from "@/features/crisis/components/SwipeToCall";
 import { useAuditStore } from "@/shared/store/auditStore";
 import { useAppStore } from "@/shared/store/appStore";
+import { metric } from "@/shared/lib/metrics";
+import { track, TELEMETRY_EVENTS } from "@/shared/lib/telemetryEvents";
 import { AnimatePresence, motion } from "framer-motion";
 import { Hospital, MessageCircle, Phone, ShieldAlert, UserRound } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -16,9 +18,18 @@ export function CrisisOverlay() {
   const emergency = useAuthStore((s) => s.profile?.emergency);
   const [grounded, setGrounded] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const groundedRef = useRef(false);
+  const markGrounded = () => {
+    if (groundedRef.current) return;
+    groundedRef.current = true;
+    setGrounded(true);
+    metric.crisisGroundingDone();
+    track(TELEMETRY_EVENTS.crisisGroundingDone);
+  };
 
   useEffect(() => {
     if (!active) {
+      groundedRef.current = false;
       setGrounded(false);
       return;
     }
@@ -117,10 +128,10 @@ export function CrisisOverlay() {
 
             <div className="grid gap-8 lg:grid-cols-[auto_1fr] lg:items-start">
               <div className="flex flex-col items-center gap-3">
-                <BreathingCircle onCycle={() => setGrounded(true)} />
+                <BreathingCircle onCycle={markGrounded} />
                 <CalmingAudio />
               </div>
-              <GroundingGame onComplete={() => setGrounded(true)} />
+              <GroundingGame onComplete={markGrounded} />
             </div>
             <button
               type="button"

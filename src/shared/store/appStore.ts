@@ -1,3 +1,4 @@
+import { track, TELEMETRY_EVENTS } from "@/shared/lib/telemetryEvents";
 import { create } from "zustand";
 
 interface AppState {
@@ -19,7 +20,13 @@ export const useAppStore = create<AppState>((set) => ({
   distressHint: false,
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
   setSidebarCollapsed: (sidebarCollapsed) => set({ sidebarCollapsed }),
-  triggerCrisis: (crisisReason) => set({ crisisActive: true, crisisReason }),
-  dismissCrisis: () => set({ crisisActive: false, crisisReason: null }),
+  triggerCrisis: (crisisReason) => {
+    set({ crisisActive: true, crisisReason });
+    track(TELEMETRY_EVENTS.crisisTriggered, { reason: crisisReason });
+  },
+  dismissCrisis: () => {
+    set({ crisisActive: false, crisisReason: null });
+    track(TELEMETRY_EVENTS.crisisResolved);
+  },
   setDistressHint: (distressHint) => set({ distressHint }),
 }));

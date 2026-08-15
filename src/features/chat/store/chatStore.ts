@@ -7,6 +7,7 @@ import { getAuthHeaders } from "@/shared/lib/authSession";
 import { callLLMWithFallback, type LLMMessage } from "@/shared/lib/llmClient";
 import { apiClient } from "@/shared/lib/apiClient";
 import { metric } from "@/shared/lib/metrics";
+import { track, TELEMETRY_EVENTS } from "@/shared/lib/telemetryEvents";
 import type {
   ChatAttachment,
   ChatMessage,
@@ -136,10 +137,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((s) => ({
       pendingMemories: s.pendingMemories.filter((m) => m.id !== id),
     })),
-  setActiveSession: (sessionId) =>
+  setActiveSession: (sessionId) => {
+    const created = !sessionId;
     set({
       activeSessionId: sessionId ?? uid("ses"),
-    }),
+    });
+    if (created) track(TELEMETRY_EVENTS.sessionStarted);
+  },
   sendMessage: (content, audio?) => {
     const state = get();
     const text = (content ?? state.composer).trim();
@@ -202,6 +206,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       isStreaming: true,
       bargeIn: false,
     });
+    track(TELEMETRY_EVENTS.messageSent);
 
     const reply = buildCBTPrompt(text || "(media only)", userMessage.injectedMemories ?? []);
 
@@ -218,6 +223,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           } else {
             get().finishStream();
             metric.streamDone();
+            track(TELEMETRY_EVENTS.streamDone);
           }
         });
 
@@ -292,9 +298,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
               truncated: true,
               content: `${m.content}\n\n*— barge-in: generation halted locally —*`,
             }
-          : m,
+              : m,
       ),
     }));
+    metric.streamTruncated();
+    track(TELEMETRY_EVENTS.streamTruncated);
   },
   attachSnapshot: (previewUrl) =>
     set((s) => ({
@@ -309,7 +317,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         },
       ],
     })),
-  hardHalt: () =>
+  hardHalt: () => {
     set((s) => ({
       isStreaming: false,
       recording: false,
@@ -322,9 +330,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
               streaming: false,
               content: `${m.content}\n\n*— session hard-halted by crisis protocol —*`,
             }
-          : m,
+              : m,
       ),
-    })),
+    }));
+    metric.streamTruncated();
+    track(TELEMETRY_EVENTS.streamTruncated);
+  },
   resumeStream: () => {
     const last = get().messages.at(-1);
     if (!last?.truncated) return;
@@ -346,6 +357,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             get().finishStream();
             metric.resumeSuccess();
             metric.streamDone();
+            track(TELEMETRY_EVENTS.streamDone);
           }
         });
       } catch {

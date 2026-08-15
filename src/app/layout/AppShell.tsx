@@ -7,11 +7,22 @@ import { CommandPalette } from "@/shared/ui/CommandPalette";
 import { OfflineBanner } from "@/shared/ui/OfflineBanner";
 import { TabSync } from "@/shared/ui/TabSync";
 import { ToastHost } from "@/shared/ui/ToastHost";
-import { Outlet } from "react-router-dom";
+import { Outlet, useLocation } from "react-router-dom";
 import { useBackendSync } from "@/shared/hooks/useBackendSync";
+import { track, TELEMETRY_EVENTS } from "@/shared/lib/telemetryEvents";
+import { useEffect } from "react";
 
 export function AppShell() {
   useBackendSync();
+  const { pathname } = useLocation();
+
+  useEffect(() => {
+    track(TELEMETRY_EVENTS.appLaunch);
+  }, []);
+
+  useEffect(() => {
+    track(TELEMETRY_EVENTS.pageView, { path: pathname });
+  }, [pathname]);
 
   return (
     <div className="flex h-[100dvh] overflow-hidden bg-canvas">

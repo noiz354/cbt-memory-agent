@@ -8,6 +8,8 @@ import { apiClient } from "@/shared/lib/apiClient";
 import { useAuditStore } from "@/shared/store/auditStore";
 import { useThemeStore } from "@/shared/store/themeStore";
 import { toast } from "@/shared/store/toastStore";
+import { metric } from "@/shared/lib/metrics";
+import { track, TELEMETRY_EVENTS } from "@/shared/lib/telemetryEvents";
 
 /**
  * All localStorage keys owned by this app.
@@ -32,6 +34,7 @@ const CBT_KEYS = [
  */
 export async function hardPurgeLocalData() {
   useAuditStore.getState().log("HARD_PURGE", "Local vault and account erased");
+  metric.purgeStarted();
 
   // Reset in-memory stores first
   useChatStore.getState().wipe();
@@ -81,6 +84,10 @@ export async function hardPurgeLocalData() {
     const stillRemaining = remaining.filter((k) => localStorage.getItem(k) !== null);
     if (stillRemaining.length > 0) {
       toast("Hard purge incomplete", `${stillRemaining.length} key(s) could not be removed.`, "danger");
+      metric.postPurgeResidue(stillRemaining.length);
     }
   }
+
+  track(TELEMETRY_EVENTS.purgeCompleted);
+  metric.purgeCompleted();
 }

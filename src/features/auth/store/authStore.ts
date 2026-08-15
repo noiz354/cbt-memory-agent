@@ -2,6 +2,7 @@ import { CONSENT_VERSION, type AuthMethod, type AuthStatus, type EmergencyContac
 import { useAuditStore } from "@/shared/store/auditStore";
 import { uid, secureToken } from "@/shared/lib/format";
 import { apiClient } from "@/shared/lib/apiClient";
+import { track, TELEMETRY_EVENTS } from "@/shared/lib/telemetryEvents";
 import { createVersionedPersist } from "@/shared/lib/versionedPersist";
 import type { TherapyGoal } from "@/shared/types";
 import { create } from "zustand";
@@ -136,20 +137,23 @@ export const useAuthStore = create<AuthState>()(
                 }
               : s.profile,
           }));
+          track(TELEMETRY_EVENTS.loginCompleted, { method: "magic-link" });
           return true;
         } catch {
           set({ magicToken: null, magicTokenExpiresAt: null });
           return false;
         }
       },
-      completeAuth: (input) =>
+      completeAuth: (input) => {
         set({
           status: "authenticated",
           step: "disclosure",
           magicToken: null,
           magicTokenExpiresAt: null,
           profile: emptyProfile(input),
-        }),
+        });
+        track(TELEMETRY_EVENTS.loginCompleted, { method: input.method });
+      },
       setStep: (step) => set({ step }),
       acceptConsent: () =>
         set((s) => {
@@ -193,6 +197,7 @@ export const useAuthStore = create<AuthState>()(
         const profile = get().profile;
         if (!profile?.consentAcceptedAt || profile.goals.length === 0) return;
         set({ status: "onboarded" });
+        track(TELEMETRY_EVENTS.onboardingCompleted);
       },
       signOut: () =>
         set({

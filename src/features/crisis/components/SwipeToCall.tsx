@@ -1,5 +1,7 @@
 import { spring } from "@/shared/lib/motion";
 import { cn } from "@/shared/lib/cn";
+import { metric } from "@/shared/lib/metrics";
+import { track, TELEMETRY_EVENTS } from "@/shared/lib/telemetryEvents";
 import { animate, motion, useMotionValue } from "framer-motion";
 import { Phone } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -30,6 +32,8 @@ export function SwipeToCall() {
   const commit = (next: number) => {
     if (next / max >= 0.88) {
       void animate(x, max, spring);
+      metric.crisisLifelineTap();
+      track(TELEMETRY_EVENTS.crisisLifelineUsed, { destination: dest });
       window.location.href = `tel:${dest}`;
       return;
     }

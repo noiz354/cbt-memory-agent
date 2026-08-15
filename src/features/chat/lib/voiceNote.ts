@@ -1,6 +1,7 @@
 import { startAudioWorker, stopAudioWorker } from "@/workers/audioClient";
 import { useChatStore } from "@/features/chat/store/chatStore";
 import { isWebSpeechSupported, startLiveRecognition, type LiveRecognition } from "./webSpeech";
+import { track, TELEMETRY_EVENTS } from "@/shared/lib/telemetryEvents";
 
 /**
  * Voice-note capture on top of the audio worker pipeline.
@@ -98,6 +99,7 @@ export function stopVoiceNote(): Promise<VoiceNoteResult> {
       const blobUrl = URL.createObjectURL(blob);
       r.blobUrl = blobUrl;
       recorder = null;
+      track(TELEMETRY_EVENTS.voiceNoteRecorded);
       const liveFallbackText = liveRecognition?.getTranscript();
       liveRecognition?.stop();
       liveRecognition = null;
@@ -157,6 +159,7 @@ async function transcribeVoiceNote(
       transcribeWorker?.removeEventListener("message", onMsg);
       if (event.data.type !== "transcript") return;
       if (event.data.ok && event.data.text) {
+        track(TELEMETRY_EVENTS.transcriptReceived, { via: "whisper" });
         resolve({
           ok: true,
           text: event.data.text,
@@ -180,6 +183,7 @@ function resolveFromFallback(
   error?: string,
 ): void {
   if (text) {
+    track(TELEMETRY_EVENTS.transcriptReceived, { via: "web-speech" });
     resolve({ ok: true, text, blobUrl, via: "web-speech" });
   } else {
     resolve({ ok: false, blobUrl, error: error ?? "transcription failed" });

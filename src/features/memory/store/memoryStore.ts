@@ -4,6 +4,7 @@ import { createVersionedPersist } from "@/shared/lib/versionedPersist";
 import { apiClient } from "@/shared/lib/apiClient";
 import { getAuthHeaders } from "@/shared/lib/authSession";
 import { metric } from "@/shared/lib/metrics";
+import { track, TELEMETRY_EVENTS } from "@/shared/lib/telemetryEvents";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
@@ -239,7 +240,7 @@ export const useMemoryStore = create<MemoryState>()(
         };
         set((s) => ({ nodes: [...s.nodes, node], selectedId: id }));
         syncNode(node);
-        metric.graphLinkCreated();
+        track(TELEMETRY_EVENTS.memoryAdded);
         return id;
       },
       linkNodes: (source, target, label = "custom") => {
@@ -275,6 +276,7 @@ export const useMemoryStore = create<MemoryState>()(
         }
 
         metric.graphLinkCreated();
+        track(TELEMETRY_EVENTS.memoryEdgeLinked);
         return true;
       },
       unlink: (edgeId) => {
@@ -307,6 +309,7 @@ export const useMemoryStore = create<MemoryState>()(
         }
 
         metric.purgeFromGraph();
+        track(TELEMETRY_EVENTS.memoryDeleted);
       },
       touch: (id) => {
         set((s) => ({
@@ -328,6 +331,7 @@ export const useMemoryStore = create<MemoryState>()(
           nodes: s.nodes.map((n) => (n.id === id ? { ...n, ...patch, lastTouched: new Date().toISOString() } : n)),
         }));
         syncNode(get().nodes.find((n) => n.id === id));
+        track(TELEMETRY_EVENTS.memoryUpdated);
       },
       touchRecall: (id) =>
         set((s) => ({
