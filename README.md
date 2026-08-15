@@ -17,35 +17,33 @@
 Semua data user (memory nodes, edges, sessions, chat turns, audit events) disimpan di
 CockroachDB — bukan hanya localStorage / file-based storage.
 
-### 2. CockroachDB Tools (Pilih Minimal 2 dari 4) — WAJIB
+### 2. CockroachDB Tools (Pilih Minimal 2 dari 4) — **4/4 AKTIF**
 
 | Tool | Status | Penggunaan |
 |---|---|---|
-| **CockroachDB Cloud Managed MCP Server** | ✅ WAJIB | AI agent query CRDB via MCP protocol |
-| **CockroachDB Distributed Vector Indexing** | ✅ WAJIB | Semantic search / RAG untuk memory |
-| ccloud CLI | ✅ Opsional | Cluster provisioning di CI/CD |
-| CockroachDB Agent Skills Repo | ✅ Opsional | Automation scripts |
-
-> **Catatan:** Repo sumber (`13-8-26-aws-x-coachroachdb-database`) berisi 133 agent skills
-> (`.agents/`, `.claude/`, `.skills/`, `skills-lock.json`) yang **tidak ikut di-merge** ke
-> monorepo ini. Jika dibutuhkan, salin dari repo sumber.
+| **CockroachDB Cloud Managed MCP Server** | ✅ **AKTIF (read-only)** | Agent query cluster via endpoint `https://cockroachlabs.cloud/mcp` (9 tool, bukti live di `docs/15-8-26/mcp-proof/`) |
+| **CockroachDB Distributed Vector Indexing** | ✅ **AKTIF** | Semantic search + hybrid keyword/vector RAG untuk memory (`embeddings_vector_idx` C-SPANN) |
+| ccloud CLI | ✅ **AKTIF** | Provisioning cluster + health gate CI (`scripts/ccloud-audit.sh`) |
+| CockroachDB Agent Skills Repo | ✅ **AKTIF (vendor)** | `skills/cockroachdb-skills/` (34 skills, 10 domain) untuk agent tooling |
 
 ### 3. AWS Services (Pilih Minimal 1) — WAJIB
 
 | Service | Status | Penggunaan |
 |---|---|---|
-| **AWS Lambda** | ✅ WAJIB | Serverless API handler |
-| **Amazon S3** | ✅ WAJIB | Export bundle storage |
-| **OpenRouter** | ✅ WAJIB | LLM inference (Llama free) + embeddings (bge-m3) |
+| **AWS Lambda** | ✅ | Serverless API handler + agentic memory loop (reflection cron) |
+| **Amazon S3** | ✅ | Export bundle storage |
+| **Amazon EventBridge** | ✅ | Schedule reflection job (rate 6 jam) → invoke Lambda |
+| **Amazon CloudWatch** | ✅ | Logs + dashboard + Lambda health gate |
+| **OpenRouter** | ✅ | LLM inference (Llama free) + embeddings (bge-m3) |
 
 ### 4. Submission Requirements — WAJIB
 
 | Item | Status | Detail |
 |---|---|---|
 | **Public Open-Source Repository** | ✅ | GitHub + MIT License |
-| **Functional Demo App URL** | ⏳ | Deploy frontend + backend |
-| **Video Demo (≤3 Menit)** | ⏳ | YouTube/Vimeo |
-| **Dokumentasi Tools** | ✅ | README + docs/ di repo |
+| **Functional Demo App URL** | ✅ | Backend: `https://4nmncatsvaol2rvmptexmxeoea0myqrr.lambda-url.ap-southeast-3.on.aws/` (`GET /api/v1/health` live OK) |
+| **Video Demo (≤3 Menit)** | ⏳ | Script siap: `docs/DEMO-SCRIPT.md` — rekam via YouTube/Vimeo |
+| **Dokumentasi Tools** | ✅ | README + `docs/ARCHITECTURE.md` + `docs/COCKROACHDB-AGENT-READY.md` + `docs/MCP-STATUS.md` |
 
 ---
 
@@ -80,13 +78,22 @@ CockroachDB — bukan hanya localStorage / file-based storage.
 │  - 11 endpoint handlers (handler.ts + handlers/)              │
 │  - Auth middleware (session token + device ID)                │
 │  - Error handling + retry logic                               │
+│  - Agentic memory loop: getMemoryContext (3-set RRF:          │
+│    heuristik + keyword fulltext + vector) → SSE               │
+│    injectedMemoryIds; reflection job tiap 6 jam               │
+│    (EventBridge → reflect.ts) ekstrak durable facts dari      │
+│    chat_turns, tulis memory_nodes kind=core verified +        │
+│    embedding, lalu surface lagi via RRF di turn berikutnya    │
 └───┬──────────────┬───────────────┬───────────────────────────┘
     │              │               │
     ▼              ▼               ▼
 ┌────────┐   ┌───────────┐   ┌──────────┐
 │ Cockr  │   │ OpenRouter│   │    S3    │
 │ oachDB │   │ (LLM+Emb) │   │ (export) │
-└────────┘   └───────────┘   └──────────┘
+│  ▲     │   └───────────┘   └──────────┘
+│  │ (agent tooling, read-only)
+│  └── CockroachDB Cloud Managed MCP + ccloud CLI + Agent Skills
+└────────┘
 ```
 
 ---
@@ -116,13 +123,14 @@ CockroachDB — bukan hanya localStorage / file-based storage.
 ├── lambda/                      # BACKEND (TypeScript, Node 22)
 │   ├── package.json             # Lambda dependencies
 │   ├── tsconfig.json
-│   ├── handler.ts               # Main Lambda handler (11 routes)
+│   ├── handler.ts               # Main Lambda handler (HTTP routes + EventBridge scheduled job)
 │   ├── middleware/
 │   │   └── auth.ts              # Auth validation middleware
 │   ├── handlers/
-│   │   ├── chatTurn.ts          # POST /chat/turn
+│   │   ├── chatTurn.ts          # POST /chat/turn (3-set RRF retrieval + SSE)
 │   │   ├── memory.ts            # GET/POST/DELETE /memory
 │   │   ├── semanticSearch.ts    # GET /memory/semantic
+│   │   ├── reflect.ts           # EventBridge scheduled reflection job
 │   │   ├── session.ts           # GET/POST /session
 │   │   ├── export.ts            # POST /export (S3)
 │   │   ├── purge.ts             # POST /purge
@@ -130,24 +138,30 @@ CockroachDB — bukan hanya localStorage / file-based storage.
 │   └── lib/
 │       ├── crdb.ts              # CockroachDB client (pg Pool)
 │       ├── openrouter.ts        # OpenRouter client (LLM + embeddings)
+│       ├── vectors.ts           # buildEmbeddingChunks, toVectorLiteral
+│       ├── retrieval.ts         # reciprocalRankFusion (RRF)
+│       ├── vectorWriter.ts      # writeNodeEmbedding (shared by memory + reflection)
+│       ├── reflection.ts        # extractReflectionFacts, reflectUser, parseReflectionJson
 │       └── s3.ts                # S3 client (presigned URLs)
 │
 ├── schema/
-│   └── crdb-schema.sql          # CockroachDB DDL (7 tables + vector index)
+│   ├── crdb-schema.sql          # CockroachDB DDL (12 tables + vector index + fulltext)
+│   └── migration-*.sql          # Idempotent migrations (audit_events REFLECTION_RAN)
 ├── infra/                       # INFRASTRUCTURE (Terraform)
 │   ├── main.tf / root.tf / backend.tf / outputs.tf / variables.tf
-│   ├── modules/                 # apigw, budget, iam, lambda, ssm
+│   ├── modules/                 # apigw, budget, eventbridge, iam, lambda, ssm
 │   ├── environments/hackathon.tfvars
-│   ├── template.yaml            # SAM (alternatif, legacy)
-│   └── serverless.yml           # Serverless Framework (legacy)
-├── scripts/                     # ccloud-bootstrap, setup-ssm-params, setup-cloudwatch
+├── scripts/                     # ccloud-bootstrap, ccloud-audit, setup-ssm-params, setup-cloudwatch, vector-health-check
 ├── mcp/
-│   └── mcp-config.json          # CockroachDB MCP Server config
-├── docs/                        # 13 docs (frontend + backend)
-├── reverse-prompt-aws-cockroachdb.md
+│   └── mcp-config.json          # CockroachDB Cloud Managed MCP (read-only)
+├── .mcp.json                    # Claude Code / editor MCP config
+├── skills/
+│   └── cockroachdb-skills/      # Vendored Agent Skills repo (34 skills)
+├── docs/                        # Architektur, MCP status, ADRs, audit docs
 └── .github/
     └── workflows/
-        └── deploy.yml           # CI/CD pipeline
+        ├── deploy.yml           # CI/CD + ccloud health gate
+        └── vector-health.yml    # Scheduled vector coverage health check
 ```
 
 ---
@@ -210,33 +224,36 @@ docker compose up -d --build   # nginx:80, proxy /api/v1 ke Lambda
 
 | Method | Path | Deskripsi | Status Backend |
 |---|---|---|---|
-| POST | `/chat/turn` | Simpan chat turn + LLM response | ⏳ Stub |
-| GET | `/memory` | List memory nodes + edges | ⏳ Stub |
-| POST | `/memory` | Upsert node/edge | ⏳ Stub |
-| DELETE | `/memory/:id` | Delete node | ⏳ Stub |
-| GET | `/memory/semantic` | Semantic search (vector index) | ⏳ Stub |
-| POST | `/session` | Save session | ⏳ Stub |
-| GET | `/sessions` | List sessions | ⏳ Stub |
-| POST | `/export` | Mint export → S3 | ⏳ Stub |
-| POST | `/purge` | Hard purge user data | ⏳ Stub |
-| GET | `/metrics` | Metrics dari audit_events | ⏳ Stub |
-| GET | `/health` | Health check | ✅ |
+| POST | `/chat/turn` | Simpan chat turn + LLM response (SSE, RRF retrieval) | ✅ Live |
+| GET | `/memory` | List memory nodes + edges | ✅ Live |
+| POST | `/memory` | Upsert node/edge | ✅ Live |
+| DELETE | `/memory/:id` | Delete node | ✅ Live |
+| GET | `/memory/semantic` | Semantic search (vector index) | ✅ Live |
+| POST | `/session` | Save session | ✅ Live |
+| GET | `/sessions` | List sessions | ✅ Live |
+| POST | `/export` | Mint export → S3 | ✅ Live |
+| POST | `/purge` | Hard purge user data | ✅ Live |
+| GET | `/metrics` | Metrics dari audit_events | ✅ Live |
+| GET | `/health` | Health check | ✅ Live |
 
-> Kontrak lengkap: `docs/BACKEND-CONTRACT.md`
+> Kontrak lengkap: `docs/BACKEND-CONTRACT.md`. Selain itu Lambda punya **scheduled job**
+> (EventBridge `rate(6 hours)`, event `{source: agent.memory, detail-type: reflect}`)
+> yang mengeksekusi refleksi memory (lihat `docs/ARCHITECTURE.md`).
 
 ---
 
 ## Hackathon Submission Checklist
 
 - [x] CockroachDB sebagai persistent memory layer
-- [x] CockroachDB Cloud MCP Server (tool #1)
-- [x] Distributed Vector Indexing (tool #2)
-- [x] OpenRouter LLM + embeddings (AWS-agnostic inference)
-- [x] AWS Lambda (AWS service #1)
-- [x] Amazon S3 (AWS service #2)
-- [ ] Functional Demo App URL (deploy frontend + backend)
-- [ ] Video Demo ≤3 menit (YouTube/Vimeo)
-- [x] Dokumentasi tools (README + docs/)
+- [x] CockroachDB Cloud Managed MCP Server (tool #1, read-only live)
+- [x] Distributed Vector Indexing (tool #2, C-SPANN + hybrid RRF)
+- [x] ccloud CLI (tool #3, provisioning + CI health gate)
+- [x] Agent Skills Repo (tool #4, vendored 34 skills)
+- [x] OpenRouter LLM + embeddings
+- [x] AWS Lambda + S3 + EventBridge + CloudWatch
+- [x] Functional Demo URL (backend live: `/api/v1/health` OK)
+- [ ] Video Demo ≤3 menit (script: `docs/DEMO-SCRIPT.md`)
+- [x] Dokumentasi tools (README + docs/ARCHITECTURE.md + docs/MCP-STATUS.md)
 - [x] Public repo + MIT License
 
 ---
