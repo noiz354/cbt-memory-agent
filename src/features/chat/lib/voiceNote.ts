@@ -1,9 +1,14 @@
 import { startAudioWorker, stopAudioWorker } from "@/workers/audioClient";
+import { useChatStore } from "@/features/chat/store/chatStore";
+import { isWebSpeechSupported, startLiveRecognition, type LiveRecognition } from "./webSpeech";
 
 /**
  * Voice-note capture on top of the audio worker pipeline.
  * Records real audio via MediaRecorder, wires the analysis worker (VAD + level)
- * while recording, then transcribes the blob on-device.
+ * while recording, then transcribes the blob on-device (Whisper).
+ *
+ * Fallback: when on-device transcription fails (worker/model unavailable), a
+ * parallel Web Speech live transcript captured during recording is used instead.
  */
 
 interface RecorderHandles {
@@ -18,6 +23,8 @@ export interface VoiceNoteResult {
   text?: string;
   blobUrl?: string;
   durationMs?: number;
+  /** "whisper" (on-device) | "web-speech" (fallback) */
+  via?: "whisper" | "web-speech";
   error?: string;
 }
 
@@ -26,12 +33,14 @@ const transcribeWorker =
     ? new Worker(new URL("@/workers/transcribe.worker", import.meta.url), { type: "module" })
     : null;
 
-let recorder: RecorderHandles | null = null;
-let onLevelCb: ((rms: number) => void) | null = null;
-
-export function getRecorderLevel(): number {
-  return recorder ? recorder.chunks.length * 2 : 0;
+function detectLanguage(): string {
+  const tag = (navigator.language || "en").toLowerCase();
+  const lang = tag.split("-")[0];
+  return lang === "id" || lang === "en" ? lang : "auto";
 }
+
+let recorder: RecorderHandles | null = null;
+let liveRecognition: LiveRecognition | null = null;
 
 /** Begin capturing: mic → MediaRecorder + audio-worker VAD/level. */
 export async function startVoiceNote(
@@ -50,13 +59,21 @@ export async function startVoiceNote(
     };
     mediaRecorder.start();
     recorder = { mediaRecorder, stream, chunks, blobUrl: null };
-    onLevelCb = onLevel ?? null;
 
     // Wire the analysis pipeline (VAD + RMS level) — real, gated by voice activity.
     if (onLevel) {
-      void startAudioWorker(stream, onLevel).catch(() => {
+      void startAudioWorker(stream, (rms, peak) => {
+        useChatStore.getState().setProsody(rms);
+        onLevel(rms, peak);
+      }).catch(() => {
         // Audio worker failure should not kill recording.
       });
+    }
+
+    // Web Speech live transcript captured in parallel — used only if on-device
+    // transcription fails.
+    if (isWebSpeechSupported()) {
+      liveRecognition = startLiveRecognition();
     }
     return { ok: true };
   } catch (err) {
@@ -74,14 +91,17 @@ export function stopVoiceNote(): Promise<VoiceNoteResult> {
     if (!r) return resolve({ ok: false, error: "not recording" });
 
     stopAudioWorker();
+    useChatStore.getState().setProsody(0);
     const stopAndBlob = () => {
       r.stream.getTracks().forEach((t) => t.stop());
       const blob = new Blob(r.chunks, { type: r.mediaRecorder.mimeType || "audio/webm" });
       const blobUrl = URL.createObjectURL(blob);
       r.blobUrl = blobUrl;
       recorder = null;
-      onLevelCb = null;
-      void transcribeVoiceNote(blobUrl, blob).then(resolve);
+      const liveFallbackText = liveRecognition?.getTranscript();
+      liveRecognition?.stop();
+      liveRecognition = null;
+      void transcribeVoiceNote(blobUrl, liveFallbackText).then(resolve);
     };
 
     if (r.mediaRecorder.state === "inactive") {
@@ -96,30 +116,72 @@ export function stopVoiceNote(): Promise<VoiceNoteResult> {
 /** Cancel recording without producing a note. */
 export function cancelVoiceNote(): void {
   const r = recorder;
+  liveRecognition?.stop();
+  liveRecognition = null;
   if (!r) return;
   stopAudioWorker();
+  useChatStore.getState().setProsody(0);
   r.stream.getTracks().forEach((t) => t.stop());
   if (r.mediaRecorder.state !== "inactive") r.mediaRecorder.stop();
   if (r.blobUrl) URL.revokeObjectURL(r.blobUrl);
   recorder = null;
-  onLevelCb = null;
 }
 
-function transcribeVoiceNote(blobUrl: string, blob: Blob): Promise<VoiceNoteResult> {
+type TranscribeMsg = {
+  type: "transcript";
+  ok: boolean;
+  text?: string;
+  error?: string;
+};
+
+/** Measure a blob's duration on the main thread (DOM only). */
+function measureBlobDuration(blobUrl: string): Promise<number> {
   return new Promise((resolve) => {
-    if (!transcribeWorker) {
-      return resolve({ ok: false, blobUrl, error: "transcription unavailable" });
-    }
-    const onMsg = (event: MessageEvent<{ type: "transcript"; ok: boolean; text?: string; durationMs?: number; error?: string }>) => {
+    const audio = new Audio(blobUrl);
+    audio.addEventListener("loadedmetadata", () => resolve(audio.duration * 1000), { once: true });
+    audio.addEventListener("error", () => resolve(0), { once: true });
+    setTimeout(() => resolve(0), 5000);
+  });
+}
+
+async function transcribeVoiceNote(
+  blobUrl: string,
+  liveFallbackText?: string,
+): Promise<VoiceNoteResult> {
+  if (!transcribeWorker) {
+    return new Promise<VoiceNoteResult>((resolve) => resolveFromFallback(resolve, liveFallbackText, blobUrl));
+  }
+  const durationMs = await measureBlobDuration(blobUrl);
+  return new Promise((resolve) => {
+    const onMsg = (event: MessageEvent<TranscribeMsg>) => {
       transcribeWorker?.removeEventListener("message", onMsg);
       if (event.data.type !== "transcript") return;
       if (event.data.ok && event.data.text) {
-        resolve({ ok: true, text: event.data.text, blobUrl, durationMs: event.data.durationMs });
+        resolve({
+          ok: true,
+          text: event.data.text,
+          blobUrl,
+          durationMs,
+          via: "whisper",
+        });
       } else {
-        resolve({ ok: false, blobUrl, error: event.data.error ?? "transcription failed" });
+        resolveFromFallback(resolve, liveFallbackText, blobUrl, event.data.error);
       }
     };
     transcribeWorker.addEventListener("message", onMsg);
-    transcribeWorker.postMessage({ type: "transcribe", blobUrl });
+    transcribeWorker.postMessage({ type: "transcribe", blobUrl, language: detectLanguage() });
   });
+}
+
+function resolveFromFallback(
+  resolve: (v: VoiceNoteResult) => void,
+  text: string | undefined,
+  blobUrl: string,
+  error?: string,
+): void {
+  if (text) {
+    resolve({ ok: true, text, blobUrl, via: "web-speech" });
+  } else {
+    resolve({ ok: false, blobUrl, error: error ?? "transcription failed" });
+  }
 }

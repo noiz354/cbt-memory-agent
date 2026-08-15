@@ -24,7 +24,7 @@ These make the "on-device, zero-cloud" branding true for the parts that are curr
 
 ### 1.1 🟢 Integrate `@mlc-ai/web-llm` for real on-device LLM — ✅ DONE (Phase A)
 - **Status:** implemented 2026-08-15. `@mlc-ai/web-llm` installed; new `src/shared/lib/onDeviceLLM.ts` (lazy `MLCEngine`, `Phi-3-mini-4k-instruct-q4f16_1-MLC`, streaming via `chat.completions`); `callOnDeviceLLM` (`llmClient.ts`) now does real on-device inference and throws only when the engine/model is unavailable so the fallback chain still runs.
-- **Remaining nuance:** model weights are ~GB class; a download/progress UI is still open (`getOnDeviceLoadProgress()` is exposed but not surfaced in the UI).
+- **Remaining nuance (✅ closed 2026-08-15 lanjutan):** progress UI kini **disurface di `LlmPanel.tsx`** — `subscribeOnDeviceProgress` + progress bar + tombol "Preload" (`preloadOnDeviceEngine()`/`isOnDeviceEngineReady()`); `setInitProgressCallback` (bukan opsi `reload`) di `onDeviceLLM.ts`. Model weights tetap ~GB class — butuh WebGPU/WebAssembly, tidak viable di low-memory.
 - **Why:** `callOnDeviceLLM` now throws (baseline fix). On-device inference is the stated differentiator but never implemented.
 - **What:** add `@mlc-ai/web-llm`, load a small model (e.g. `Phi-3-mini-4k-instruct-q4f16_1-MLC` as already referenced in `llmClient.ts`), wire into `callOnDeviceLLM` to stream tokens via `onStream`. Keep the throw only when the model isn't loaded.
 - **Files:** `src/shared/lib/llmClient.ts:152-167`; new `src/workers/llm.worker.ts` optional.
@@ -33,6 +33,7 @@ These make the "on-device, zero-cloud" branding true for the parts that are curr
 
 ### 1.2 🟢 Wire the audio pipeline into HoldToTalkOrb (voice notes, real) — ✅ DONE (Phase A)
 - **Status:** implemented 2026-08-15. New `src/features/chat/lib/voiceNote.ts` (`startVoiceNote` getUserMedia + MediaRecorder + `startAudioWorker` VAD/level, `stopVoiceNote` → blob + transcription, `cancelVoiceNote`); `HoldToTalkOrb.tsx` rewritten (record → transcribe → `sendMessage(text, {src})`; no fake message; mic-denied toast; recording-level dot).
+- **Lanjutan 2026-08-15 (P1-2):** `voiceNote.ts` kini juga feed `chatStore.setProsody(rms)` untuk crisis fusion; durasi blob diukur di main thread (`measureBlobDuration` — fix `new Audio()` yang tak ada di worker scope); `detectLanguage()` dari `navigator.language`; fallback Web Speech live (`webSpeech.ts`) → `via: "web-speech"` + toast info.
 - **Why:** `HoldToTalkOrb.tsx:20` still injects a **hardcoded fake voice-note message** on stop; `startAudioWorker` has zero callers (dead code).
 - **What:** in `HoldToTalkOrb.start()` call `getUserMedia({audio:true})` + `startAudioWorker(stream, onLevel, onVoice)`; on `stop()` stop the worker, transcribe the captured PCM, and call `sendMessage(transcript)`. Add VAD gating (`isVoiceActive`), mic-denied toast, and a recording-level indicator (RMS/peak already streamed from `audioClient.ts:37-62`).
 - **Files:** `src/features/chat/components/HoldToTalkOrb.tsx`, `src/workers/audioClient.ts` (already complete), `src/workers/audio.worker.ts`, `src/workers/audio-processor.ts`, `src/workers/vad.worker.ts`.
@@ -41,12 +42,14 @@ These make the "on-device, zero-cloud" branding true for the parts that are curr
 
 ### 1.3 🟡 On-device transcription (Whisper.cpp WASM / transformers.js) — ✅ DONE (Phase A)
 - **Status:** implemented 2026-08-15. `@huggingface/transformers` (v4.2.0) installed; new `src/workers/transcribe.worker.ts` runs `pipeline('automatic-speech-recognition','onnx-community/whisper-tiny')` lazily on the recorded blob and returns the transcript; wired via `voiceNote.ts`. Model downloads on first use (`env.allowLocalModels = false`).
+- **Lanjutan 2026-08-15 (P1-2):** EN + ID eksplisit — `TranscribeIn.language` (dari `detectLanguage()` main-thread) → `model(blobUrl, {language, return_timestamps:false})`. **Fix bug:** `new Audio()` di worker selalu `ReferenceError` (Audio/DOM tak ada di worker scope) → jalur Whisper selalu jatuh ke fallback; kini durasi diukur di main thread (`measureBlobDuration` di `voiceNote.ts`). Fallback Web Speech API real bila worker gagal (`via: "web-speech"`).
 - **Why:** hold-to-talk has no transcription engine. `onnxruntime-web` is already a dependency (used by VAD); a Whisper ONNX model can reuse it.
 - **What:** add a whisper-tiny/base ONNX build, decode in `src/workers/audio.worker.ts` (or a new `transcribe.worker.ts`), return text on flush after silence (`getSilenceFrames`).
 - **Acceptance:** spoken phrase → text appended as a chat message. 🟡 (model size + runtime tuning)
 
 ### 1.4 🟢 Replace the fake face-expression worker with a real model — ✅ DONE (Phase A)
 - **Status:** implemented 2026-08-15. `@mediapipe/tasks-vision` installed; `face_landmarker.task` (float16, 3.7MB) downloaded to `public/models/`; `src/workers/face.worker.ts` now runs real `FaceLandmarker` (CPU, IMAGE mode, `outputFaceBlendshapes`) and maps blendshapes → distressed/tense/sad/engaged/neutral with confidence. Same `FaceWorkerOut` contract; `FaceSignal.model` added (`'mediapipe'|'fallback'`), `CameraPip` shows `ML`/`approx`. Luma fallback retained only if the model fails to load.
+- **Lanjutan 2026-08-15 (P1-1):** interval adaptif di `faceClient.ts` — self-scheduling `setTimeout`, `INTERVALS_MS={active:200,idle:1000,crisis:0}` + `CRISIS_POLL_MS=500`, mode dari `recording/isStreaming/crisisActive` via `getMode()` di `CameraPip`; guard `video.readyState<2` kini me-re-schedule (bukan return permanen). Wasm MediaPipe disalin ke `public/wasm/` (23MB) + `FilesetResolver.forVisionTasks('/wasm')` (fix build: API lama `{wasmPaths}` dihapus).
 - **Why:** `src/workers/face.worker.ts:30` maps **luma** to a fake expression; the UI already shows expression+confidence from `CameraPip.tsx`.
 - **What:** swap the stand-in for MediaPipe Face Landmarker (or an ONNX emotion model via existing `onnxruntime-web`). Keep the same `FaceWorkerOut` message contract so `faceClient.ts`/`CameraPip` don't change.
 - **Files:** `src/workers/face.worker.ts`, `src/workers/faceClient.ts`.
@@ -127,30 +130,31 @@ These make the "on-device, zero-cloud" branding true for the parts that are curr
 
 ## 3. Backend endpoints with no frontend integration (or stubbed)
 
-### 3.1 🟢 Implement `/metrics` (see 2.3)
-Backend stub `health.ts:39` returns empty arrays. Needs a real aggregation query + an audit-store write path. (Frontend work in 2.3.)
+### 3.1 ✅ DONE — `/metrics` real (see 2.3)
+`handleMetrics` (`lambda/handlers/health.ts:34-110`) adalah aggregasi real per-user (sessions by status, memory counts/confidence/refs, chat_turns, `audit_events` grouped by type, crisis counts); routed di `handler.ts:128-130`.
 
 ### 3.2 ✅ DONE — Real token verification in `validateAuth`
 - **Status (2026-08-15, Phase C, via Resend magic-link):** backend now mints a server-side `session_token` (32 B `crypto.randomBytes`) at magic-link consumption, stores it on the `users` row (`users.session_token` added to schema); `validateAuth` (now async, takes `crdb`) does `SELECT id FROM users WHERE session_token=$1` and returns the row's id. Legacy `profile.id` tokens still pass via fallback (`userId = token`) so old sessions keep working. `getAuthHeaders` prefers `sessionToken` over `profile.id`. **Deployment pending:** schema + env not yet applied to the live Lambda.
 - **Acceptance:** a forged/guessed token is rejected; the server derives `userId` from its own table.
 
-### 3.3 🟢 `/memory/semantic` search is implemented but unused
-Backend `semanticSearch.ts` is real; only the UI (2.1) is missing. No backend change needed — just call it.
+### 3.3 ✅ DONE — `/memory/semantic` search is implemented + wired (see 2.1)
+Backend `semanticSearch.ts` real; UI di `MemoryPage.tsx` (debounce 400ms → `apiClient.searchMemory`, chips clickable, fallback substring lokal).
 
-### 3.4 🟢 Edge-delete endpoint (see 2.7) — ✅ DONE
-`DELETE /api/v1/memory/edge/:id` added in `lambda/handlers/memory.ts` + routed in `handler.ts`; frontend `apiClient.deleteMemoryEdge` + `unlink` wired.
+### 3.4 ✅ DONE — Edge-delete endpoint (see 2.7)
+`DELETE /api/v1/memory/edge/:id` added in `lambda/handlers/memory.ts` + routed in `handler.ts`; frontend `apiClient.deleteMemoryEdge` + `unlink` wired. **Follow-up tersisa:** FK `23503` (link 2 node yang belum ada di server) belum di-catch → masih bisa 500 (`memory.ts:173-176` hanya catch `23505`).
 
-### 3.5 🟡 `/chat/turn` rate limiting + server audit
+### 3.5 🟡 `/chat/turn` rate limiting + server audit — ⬜ still open (verified 2026-08-15)
 - **Why:** any token-holder can burn OpenRouter credits; no server-side audit log.
-- **What:** per-token rate limit (in-memory map or DynamoDB; or API Gateway throttling), and an `audit_events` write on crisis/consent/purge events from the server side.
+- **Status:** `lambda/lib/rateLimit.ts` belum ada; nol `429`/`rateLimit` di seluruh `lambda/`. Tabel `audit_events` ada di schema (9 jenis event) tapi **zero INSERT** — hanya dibaca (export.ts:51, health.ts:42/69); bahkan `purge.ts` tidak menulis `HARD_PURGE`.
+- **What:** per-token rate limit (in-memory map atau DynamoDB; atau API Gateway throttling), dan `audit_events` write pada crisis/consent/purge events server-side.
 - **Files:** `lambda/handler.ts`, new `lambda/lib/rateLimit.ts`, `lambda/lib/crdb.ts`.
 - **Acceptance:** N requests/minute/token → 429; crisis/purge events appear in the DB.
 
-### 3.6 🟡 Set `ALLOWED_ORIGIN` in deployed Lambda env
-Baseline made it fail-loud; now actually set the env var to the deployed frontend origin so CORS is never `*`. **Infra/ops task** — needs the deployed domain + `terraform`/SSM update.
+### 3.6 🟡 Set `ALLOWED_ORIGIN` in deployed Lambda env — 🔶 partial (wired, value masih `*`)
+Baseline made it fail-loud; now actually set the env var to the deployed frontend origin so CORS is never `*`. **Status 2026-08-15:** env `ALLOWED_ORIGIN` sudah di-wire lewat terraform (`infra/modules/lambda/main.tf:46`) tapi nilai di `infra/terraform.tfvars:16` masih `"*"`; `.env`/`.env.example` tidak punya key `ALLOWED_ORIGIN`. **Infra/ops task** — butuh deployed domain + update tfvars/SSM.
 
-### 3.7 🟢 Device registry (replace fake `seedDevices`)
-- **Why:** `privacyStore.ts:13-38` ships hardcoded demo devices; `revoke` just filters a local array.
+### 3.7 🟢 Device registry (replace fake `seedDevices`) — ⬜ open (verified 2026-08-15)
+- **Status:** masih `seedDevices` palsu di `privacyStore.ts:13-38` (3 device demo); `revoke` cuma filter array lokal. Tidak ada endpoint `/devices` di `lambda/handler.ts` (routing `:72-135`) maupun `lambda/handlers/`.
 - **What:** backend endpoints `POST /devices`, `GET /devices`, `DELETE /devices/:id`; frontend `SessionTable` reads/writes them; current-device revoke clears the stored session token.
 - **Files:** `lambda/handler.ts` + new `lambda/handlers/devices.ts`, `src/features/privacy/store/privacyStore.ts`, `src/features/privacy/components/SessionTable.tsx`.
 - **Acceptance:** the privacy "active sessions" list reflects real registered devices and revoke actually kills a session server-side.
@@ -159,14 +163,14 @@ Baseline made it fail-loud; now actually set the env var to the deployed fronten
 
 ## 4. Hardening / infra (defense-in-depth for a clinical app)
 
-- **4.1** CSP + `X-Content-Type-Options`/`Referrer-Policy` headers (`index.html` meta + `corsHeaders()` in `handler.ts`). (WEB-QUALITY §7#7.)
-- **4.2** Route-level code splitting (`main.tsx` statically imports every feature; a per-route lazy import cuts prod JS per page). (WEB-QUALITY §7#6.)
-- **4.3** Re-run Lighthouse against `npm run build` + `vite preview` (or the deployed bundle) to get real perf numbers and confirm CWV. (WEB-QUALITY §7#5.)
-- **4.4** Fix the misleading privacy copy ("never leaves this device") or gate cloud sync behind an explicit opt-in, per SECURITY §2.6.
-- **4.5** Complete passkey (`navigator.credentials.get()` assertion ceremony) or remove the fake local-key fallback, per SECURITY §2.5.
-- **4.6** Send the real display name to the server — **partial (2026-08-15):** magic-link consumption now stores the user's `email` as `display_name` (email prefix) instead of hardcoding `'device-user'` for magic-link users. Passkey/legacy path still `'device-user'`.
-- **4.7** Replace remaining seed data with true empty states on first run (baseline fixed the hydrate-failure path only; the *initial* seed on a brand-new store remains demo content).
-- **4.8** Remove dead code surfaced by the audit: `metrics.ts` crisis wrappers, `uploadExportBundle` (if 3.4 not chosen), `coreMemories()`, `nodeScale()`, `searchMemory`'s unused state after 2.1.
+- **4.1** CSP + `X-Content-Type-Options`/`Referrer-Policy` headers — **🔶 partial:** nginx sudah set `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`, dan full CSP (`nginx.conf:45-49`). Yang masih terbuka: CSP meta di `index.html` (belum ada) + `corsHeaders()` di `lambda/handler.ts` (lambda tak punya CSP/X-CTO/Referrer). (WEB-QUALITY §7#7.)
+- **4.2** Route-level code splitting — **⬜ open:** `src/app/router.tsx:3-11` masih statik import semua 9 page; nol `React.lazy`/dynamic `import(`. (WEB-QUALITY §7#6.)
+- **4.3** Re-run Lighthouse terhadap `npm run build` + `vite preview` (atau deployed bundle) untuk angka perf/CWV nyata. (WEB-QUALITY §7#5.)
+- **4.4** Fix the misleading privacy copy ("never leaves this device") atau gate cloud sync di belakang opt-in eksplisit, per SECURITY §2.6. — **⬜ open (verified 2026-08-15):** `chatStore.ts:59`, `llmClient.ts:67`, `PrivacyPage.tsx:33`, `AuthPage.tsx:25` masih mengklaim on-device padahal data di-upload.
+- **4.5** Complete passkey (`navigator.credentials.get()` assertion ceremony) atau hapus fallback fake local-key, per SECURITY §2.5. — **🔶 partial:** `credentials.create` real (`passkey.ts:22-43`); `credentials.get` nol match → belum ada login ceremony; `mintLocalDeviceKey()` masih dipakai di `PasskeyPanel.tsx:59-60`.
+- **4.6** Send the real display name to the server — **🔶 partial (2026-08-15):** magic-link consumption stores email prefix as `display_name` (`auth.ts:198-203`); passkey/legacy path masih `'device-user'` di `chatTurn.ts:151-152`, `memory.ts:245-246`, `session.ts:161-162`, `export.ts:60`.
+- **4.7** Replace remaining seed data with true empty states on first run — **⬜ open (verified 2026-08-15):** baseline fixed hydrate-failure only; *initial* seed masih demo (`chatStore.ts:53-81` seedMessages, `memoryStore.ts:33-120` seedNodes+seedEdges, `sessionStore.ts:31-104` seed, `privacyStore.ts:13-38` seedDevices).
+- **4.8** Remove dead code surfaced by the audit — **🔶 partial:** `coreMemories()` (`memoryStore.ts:347`), `nodeScale()` (`types.ts:43`), 7 metric crisis wrappers (`metrics.ts`) — semua DEAD (nol caller). `uploadExportBundle` **sudah LIVE** sejak Phase B (`ExportBuilder.tsx:82`) — bukan dead lagi. `apiClient.searchMemory`/`apiClient.purge` juga sudah punya caller.
 
 ---
 
@@ -179,4 +183,6 @@ Baseline made it fail-loud; now actually set the env var to the deployed fronten
 | **C — Real auth** | 3.2, 3.7, 4.4, 4.5 | Remove the security blockers before any real deployment |
 | **D — Hardening** | 3.5, 3.6, 4.1–4.3, 4.6–4.8 | Production readiness |
 
-> **Phases A + B completed 2026-08-15** (see PROGRESS.md). Phase C (real auth) partially done 2026-08-15: **3.2 real token verification + Resend magic-link email backend** implemented (deployment pending — needs `aws login` + schema/env apply). Remaining Phase C: 3.7 device registry, 4.4 privacy copy, 4.5 passkey `credentials.get()`. Phase D (hardening): open below.
+> **Phases A + B completed 2026-08-15** (see PROGRESS.md). Phase C (real auth) partially done 2026-08-15: **3.2 real token verification + Resend magic-link email backend** implemented (deployment pending — needs `aws login` + schema/env apply). Remaining Phase C: **deploy Phase C**, 3.7 device registry, 4.4 privacy copy, 4.5 passkey `credentials.get()`. Phase D (hardening): open below.
+>
+> **Verified 2026-08-15:** 3.1 & 3.3 done (real metrics + semantic search wired), 3.4 edge-delete done (FK 23503 follow-up open), 3.5 rate limit + server audit open, 3.6 `ALLOWED_ORIGIN` masih `*`, 3.7 device registry open, 4.1 CSP partial (nginx done), 4.2/4.3/4.4/4.7 open, 4.5/4.6/4.8 partial, 1.1 progress UI **✅ closed (LlmPanel)**, 1.2/1.3 **✅ + EN+ID + Web Speech fallback + fix Audio-in-worker**, 1.4 **✅ + interval adaptif**, **P1-3 crisis fusion + P1-4 intisari DONE**. `deploy.yml` belum kirim `TF_VAR_resend_api_key` (required var) → CI akan gagal sampai secret ditambah.

@@ -16,7 +16,7 @@ export function HoldToTalkOrb() {
     cancelling.current = false;
     const res = await startVoiceNote((rms) => setLevel(Math.min(1, rms / 0.5)));
     if (!res.ok) {
-      toast("Microphone unavailable", res.error ?? "Permission denied.", "error");
+      toast("Microphone unavailable", res.error ?? "Permission denied.", "danger");
       return;
     }
     setRecording(true);
@@ -36,9 +36,16 @@ export function HoldToTalkOrb() {
           src: note.blobUrl,
         });
       } else {
-        toast("Voice note failed", note.error ?? "Recording failed.", "error");
+        toast("Voice note failed", note.error ?? "Recording failed.", "danger");
       }
       return;
+    }
+    if (note.via === "web-speech") {
+      toast(
+        "On-device speech model unavailable",
+        "Transcribed with your browser's speech service instead.",
+        "ink",
+      );
     }
     sendMessage(note.text ?? "[voice note]", {
       durationMs: note.durationMs ?? 0,

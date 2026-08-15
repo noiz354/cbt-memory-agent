@@ -1,5 +1,6 @@
 import { useAuthStore } from "@/features/auth/store/authStore";
 import { useChatStore } from "@/features/chat/store/chatStore";
+import { generateIntisari } from "@/features/chat/lib/intisari";
 import { useSessionStore } from "@/features/sessions/store/sessionStore";
 import { useAuditStore } from "@/shared/store/auditStore";
 import { useAppStore } from "@/shared/store/appStore";
@@ -29,16 +30,17 @@ export function ChatSafetyHeader() {
 
   const finalize = () => {
     const lastUser = [...messages].reverse().find((m) => m.role === "user");
+    const intisari = generateIntisari(messages);
     addSession({
       title: lastUser ? lastUser.content.slice(0, 42) : "Live workspace",
       status: "extracted",
-      mood: 5,
-      moodLabel: "grounded",
+      mood: intisari.mood,
+      moodLabel: intisari.moodLabel,
       startedAt: new Date(Date.now() - elapsed * 1000).toISOString(),
       durationMin: Math.max(1, Math.round(elapsed / 60)),
-      excerpt: lastUser?.content.slice(0, 140) ?? "Session finalized from the workspace.",
+      excerpt: intisari.excerpt,
       thought: lastUser?.content ?? "",
-      reframe: null,
+      reframe: intisari.reframe,
     });
     useAuditStore.getState().log("SESSION_FINALIZED", `${mm}:${ss} · ${messages.length} turns`);
     toast("Session finalized", "Trace written to history.", "success");

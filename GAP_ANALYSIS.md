@@ -4,6 +4,7 @@ Audit terhadap blueprint produksi (6 halaman wajib, katalog 100 komponen 2026, 3
 
 **Tanggal audit:** 2026-08-13  
 **Kode:** ~103 berkas TS/TSX, arsitektur berbasis fitur.
+**Pembaruan 2026-08-15:** beberapa item "OUT OF SCOPE" sudah terimplementasi di Phase A (lihat PROGRESS.md) — ditandai ✅ SHIPPED di bawah. Baris yang belum diubah masih berlaku.
 
 Legenda:
 
@@ -68,8 +69,8 @@ Enam rute + deep-link `/sessions/:id` dan `/memory/:id` hidup. Celah tersisa ham
 | Scroll-to-latest FAB | SHIPPED |
 | Truncation 29s + tombol Auto-resume | SHIPPED |
 | Rail menyembunyikan memori unverified &lt; 0.6 | SHIPPED |
-| MediaPipe Face Landmarker sungguhan | OUT OF SCOPE — worker luma stand-in, tanpa fetch model |
-| Kokoro / Whisper on-device | OUT OF SCOPE — orb + waveform simulasi transkrip |
+| MediaPipe Face Landmarker sungguhan | ✅ SHIPPED (2026-08-15) — `@mediapipe/tasks-vision` + `face_landmarker.task` (3.7MB), worker real blendshapes → ekspresi, fallback luma jika model gagal; **lanjutan: interval adaptif** (5Hz aktif/1Hz idle/0Hz crisis, `faceClient.ts`), wasm di `public/wasm/` |
+| Kokoro / Whisper on-device | 🔶 PARTIAL (2026-08-15) — Whisper tiny (`@huggingface/transformers` + `onnx-community/whisper-tiny`) + voice notes real via hold-to-talk; **lanjutan: EN+ID via `detectLanguage()` + fallback Web Speech API real** (`webSpeech.ts`); **Kokoro TTS belum** (pakai Web Speech `speechSynthesis`, bukan WebGPU/Kokoro) |
 
 ## Page 3 — Crisis overlay (`z-index: 99999`)
 
@@ -146,7 +147,7 @@ Enam rute + deep-link `/sessions/:id` dan `/memory/:id` hidup. Celah tersisa ham
 ## Keputusan arsitektur yang disengaja
 
 1. **Tidak ada server.** “JWT”, “QStash”, “IDOR” diganti persist + gate klien. Ini konsisten dengan *Zero-Cloud Privacy* di mega-prompt, bukan regresi.
-2. **Vision/audio adalah pipeline, bukan model produksi.** Worker siap diganti MediaPipe/FFT tanpa mengubah kontrak UI.
+2. **Vision/audio adalah pipeline on-device.** (Pembaruan 2026-08-15: face kini real MediaPipe Face Landmarker; transkripsi real Whisper tiny via transformers.js; binaural real; WebLLM on-device real — lihat PROGRESS.md Phase A.)
 3. **Crisis language adalah Layer 1 (regex).** Layer 2 LLM classifier membutuhkan endpoint; tidak dipasang.
 4. **Hard purge bersifat lokal dan irreversible** di `localStorage` + store. Tidak ada OTP email kedua.
 
@@ -156,4 +157,4 @@ Enam rute + deep-link `/sessions/:id` dan `/memory/:id` hidup. Celah tersisa ham
 2. Sort vault by `references`.  
 3. Tabel passkey di tab Security.  
 4. Seed satu node `crisisFlag: true` untuk demo badge.  
-5. Mengganti face worker dengan Face Landmarker jika bundle model diizinkan offline.
+5. ✅ ~~Mengganti face worker dengan Face Landmarker~~ — **DONE (2026-08-15)** via `@mediapipe/tasks-vision` (lihat Page 2).

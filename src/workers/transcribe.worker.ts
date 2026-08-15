@@ -5,9 +5,16 @@
 
 import { pipeline, env } from "@huggingface/transformers";
 
+type AsrPipeline = (
+  audio: string,
+  options?: { language?: string; return_timestamps?: boolean },
+) => Promise<{ text?: string }>;
+
 interface TranscribeIn {
   type: "transcribe";
   blobUrl: string;
+  /** ISO-639-1 language hint (e.g. "id" / "en"); undefined = auto-detect. */
+  language?: string;
 }
 
 interface TranscribeOut {
@@ -15,18 +22,17 @@ interface TranscribeOut {
   ok: boolean;
   text?: string;
   error?: string;
-  durationMs?: number;
 }
 
 env.allowLocalModels = false;
 
-let transcriber: Awaited<ReturnType<typeof pipeline>> | null = null;
-let loading: Promise<Awaited<ReturnType<typeof pipeline>>> | null = null;
+let transcriber: AsrPipeline | null = null;
+let loading: Promise<AsrPipeline> | null = null;
 
-async function getTranscriber(): Promise<Awaited<ReturnType<typeof pipeline>>> {
+async function getTranscriber(): Promise<AsrPipeline> {
   if (transcriber) return transcriber;
   if (!loading) {
-    loading = pipeline("automatic-speech-recognition", "onnx-community/whisper-tiny");
+    loading = pipeline("automatic-speech-recognition", "onnx-community/whisper-tiny") as Promise<AsrPipeline>;
   }
   transcriber = await loading;
   return transcriber;
@@ -35,22 +41,20 @@ async function getTranscriber(): Promise<Awaited<ReturnType<typeof pipeline>>> {
 self.onmessage = async (event: MessageEvent<TranscribeIn>) => {
   if (event.data.type !== "transcribe") return;
   try {
-    const audio = new Audio(event.data.blobUrl);
-    const durationMs = await new Promise<number>((resolve) => {
-      audio.addEventListener("loadedmetadata", () => resolve(audio.duration * 1000), { once: true });
-      audio.addEventListener("error", () => resolve(0), { once: true });
-      setTimeout(() => resolve(0), 5000);
-    });
-
     const model = await getTranscriber();
-    const output = (await model(event.data.blobUrl)) as { text?: string };
+    // NB: cannot build an <audio> element here — no DOM in a worker. Duration
+    // is measured on the main thread in voiceNote.ts.
+    const output = await model(event.data.blobUrl, {
+      language: event.data.language ?? "auto",
+      // 0 = no timestamp decoding; single contiguous transcript is enough
+      return_timestamps: false,
+    });
     const text = output?.text?.trim();
 
     const payload: TranscribeOut = {
       type: "transcript",
       ok: Boolean(text),
       text,
-      durationMs,
     };
     self.postMessage(payload);
   } catch (err) {

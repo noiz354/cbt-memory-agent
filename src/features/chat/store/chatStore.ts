@@ -29,6 +29,8 @@ interface ChatState {
   cameraOpen: boolean;
   recording: boolean;
   bargeIn: boolean;
+  /** Live mic RMS (0..1) while recording; 0 when idle. Feeds crisis fusion. */
+  prosody: number;
   setComposer: (value: string) => void;
   setActiveDropZone: (id: string | null) => void;
   setQuote: (quote: QuoteDraft | null) => void;
@@ -47,6 +49,7 @@ interface ChatState {
   attachSnapshot: (previewUrl: string) => void;
   hardHalt: () => void;
   resumeStream: () => void;
+  setProsody: (rms: number) => void;
   wipe: () => void;
 }
 
@@ -113,6 +116,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   cameraOpen: false,
   recording: false,
   bargeIn: false,
+  prosody: 0,
   setComposer: (composer) => set({ composer }),
   setActiveDropZone: (activeDropZone) => set({ activeDropZone }),
   setQuote: (quote) => set({ quote }),
@@ -273,6 +277,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setCameraOpen: (cameraOpen) => set({ cameraOpen }),
   setFace: (face) => set({ face }),
   setRecording: (recording) => set({ recording }),
+  setProsody: (prosody) => set({ prosody }),
   triggerBargeIn: () => {
     const { isStreaming } = get();
     if (!isStreaming) return;

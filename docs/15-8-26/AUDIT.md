@@ -4,6 +4,10 @@
 > Backend health (via Vite proxy): `{"status":"ok","crdb":"connected","llm":"available","s3":"available"}`. `typecheck` passes.
 > Method: read-only source review of all features (`chat`, `sessions`, `memory`, `auth`, `crisis`, `privacy`) + Lambda handlers,
 > plus live browser/Lighthouse verification (auth flow, onboarding, page snapshots).
+> **Status update (2026-08-15, later session):** Phase A + B (WORK-LIST on-device + no-UI features) and Phase C (Resend magic-link)
+> have been implemented since this audit was written; sections below are annotated where they are now ✅ FIXED. See PROGRESS.md.
+> **Phase 1 on-device (2026-08-15, later still):** P1-1 adaptive interval + P1-2 Whisper EN+ID + Web Speech fallback + P1-3 crisis fusion multimodal
+> + P1-4 intisari rule-based now DONE (§1.2-1.4, §2.2, §5). WebLLM progress surfaced in `LlmPanel.tsx`. `npx tsc -b` + `npm run build` PASS.
 >
 > Companion docs in this folder:
 > - [`WEB-QUALITY-AUDIT.md`](./WEB-QUALITY-AUDIT.md) — Lighthouse scores per page, Core Web Vitals, accessibility/SEO details.
@@ -23,22 +27,23 @@ Legend: REAL = works end-to-end · PARTIAL = partly works, partly fake · STUB =
   (`llmClient.ts:162`) so the fallback chain (backend-proxy → openrouter) actually runs. Both callers (`sendMessage`/`resumeStream`)
   use `callLLMWithFallback` so the throw is handled; the stuck-streaming hang is resolved.
 - Real SSE path still verified working server-side (`parseBackendProxySSE`; `lambda/handlers/chatTurn.ts` streams OpenRouter → SSE).
-- **Still open:** integrating `@mlc-ai/web-llm` so on-device inference actually works (option c).
+- **Follow-up (done 2026-08-15 Phase A):** `@mlc-ai/web-llm` integrated (`src/shared/lib/onDeviceLLM.ts`, lazy `MLCEngine`, Phi-3-mini Q4, real streaming). **✅ 2026-08-15 lanjutan:** progress kini disurface di UI — `subscribeOnDeviceProgress` + progress bar + tombol "Preload" di `LlmPanel.tsx`; `preloadOnDeviceEngine()`/`isOnDeviceEngineReady()`; `setInitProgressCallback` bukan options `reload`.
 
-### 1.2 STUB — Hold-to-talk / voice
-- `src/features/chat/components/HoldToTalkOrb.tsx:20` — `stop()` injects a **hardcoded fake voice-note message**; `start()` uses a no-op `setTimeout(() => undefined, 0)`.
-- Entire audio stack is **dead code** — nothing calls `startAudioWorker`:
-  `src/workers/audioClient.ts` (AudioWorklet → ScriptProcessor fallback, VAD gating, no destination connect), `audio.worker.ts`, `audio-processor.ts`, `vad.worker.ts` (Silero ONNX at `/models/silero_vad.onnx` exists 2.3MB, but is a "stateless approximation" and never invoked).
-- Real implementation needs P1-2 Whisper.cpp WASM + wiring `startAudioWorker` into `HoldToTalkOrb`.
+### 1.2 ✅ FIXED — Hold-to-talk / voice (real, Phase A 2026-08-15)
+- `src/features/chat/lib/voiceNote.ts` (new): `getUserMedia` + `MediaRecorder` + `startAudioWorker` (VAD/level) → blob + transkrip.
+- `HoldToTalkOrb.tsx` ditulis ulang: record → transcribe → `sendMessage(text, {src})`; tidak ada pesan fake; mic-denied toast; indikator level.
+- Transkripsi on-device: `src/workers/transcribe.worker.ts` (`@huggingface/transformers` + `onnx-community/whisper-tiny`, lazy, `env.allowLocalModels = false`).
+- **✅ 2026-08-15 lanjutan (P1-2):** EN+ID — `detectLanguage()` dari `navigator.language` → hint `language` ke worker (`transcribe.worker.ts`). Fallback Web Speech real: `src/features/chat/lib/webSpeech.ts` (live recognition paralel, dipakai bila Whisper worker gagal → `via: "web-speech"`, toast info di `HoldToTalkOrb`).
+- **✅ 2026-08-15 lanjutan (fix bug):** `new Audio()` di worker selalu `ReferenceError` (tidak ada DOM di worker) → jalur Whisper selalu jatuh ke fallback; durasi kini diukur di main thread (`measureBlobDuration`).
 
-### 1.3 FAKE — Face expression detection
-- `src/workers/face.worker.ts:30` — computes frame **luma** → maps to fake expression (neutral/engaged/tense/sad/distressed); `distressed` fires when the image is *bright*. Comment admits production would use MediaPipe Face Landmarker.
-- `CameraPip.tsx` opens the **real camera** (getUserMedia, 320x240), real snapshot → `attachSnapshot`; but expression reading is fake.
+### 1.3 ✅ FIXED — Face expression detection (real MediaPipe, Phase A 2026-08-15)
+- `@mediapipe/tasks-vision` + `face_landmarker.task` (3.7MB, `public/models/`) → `src/workers/face.worker.ts` (CPU, IMAGE mode, `outputFaceBlendshapes`) → blendshapes → distressed/tense/sad/engaged/neutral + confidence.
+- Kontrak `FaceWorkerOut` dipertahankan; `FaceSignal.model` (`'mediapipe'|'fallback'`), `CameraPip` menampilkan `ML`/`approx`. Luma fallback dipertahankan hanya jika model gagal load.
+- **✅ 2026-08-15 lanjutan (P1-1):** interval adaptif di `faceClient.ts` — self-scheduling `setTimeout` (`INTERVALS_MS = {active:200, idle:1000, crisis:0}`, `CRISIS_POLL_MS=500`), mode dari `recording/isStreaming/crisisActive` via `getMode()` di `CameraPip`. Wasm kini disalin ke `public/wasm/` (23MB) + `FilesetResolver.forVisionTasks('/wasm')` (API lama `{wasmPaths}` dihapus — fix build).
 
-### 1.4 FAKE — Waveform / audio playback / barge-in
-- Seed `msg_3` carries hardcoded `audio.peaks`; `WaveformScrubber.tsx:12` is `const [progress, setProgress] = useState(0.22)` — static, no `<audio>`/AudioContext. Decorative only.
-- "Swipe to barge-in" just halts generation (`triggerBargeIn`).
-- `resumeStream`/`truncated` is **dead code** — `truncated: true` never set anywhere; `ChatBubble.tsx:146` resume button only shows when truncated.
+### 1.4 ✅ FIXED — Waveform / audio playback / barge-in (Phase A 2026-08-15)
+- `WaveformScrubber.tsx` kini memutar `HTMLAudioElement` real (play/pause, scrub seek) saat `audio.src` ada.
+- `triggerBargeIn` set `truncated: true` → path resume di `ChatBubble.tsx:146` reachable; swipe barge-in menghentikan generation + playback note saat unmount.
 
 ### 1.5 DEMO — Seed data
 - `chatStore.ts:52` `seedMessages` (3 fabricated turns incl. fake audio), `memoryStore.ts:32` `seedNodes` (7 nodes + 5 edges), `sessionStore.ts:31` seed sessions (6 demo).
@@ -61,19 +66,18 @@ Fixed fake IDs (`ses_slack`, `ses_kitchen`, …), 2026 timestamps, scripted CBT 
 
 ### 2.2 PARTIAL — listSessions / saveSession
 - `listSessions` → `GET /sessions` → real Lambda/CRDB query (`sessionStore.ts:120`, `lambda/handlers/session.ts:106-151`). REAL.
-- `saveSession` → `POST /session` upsert, real handler. But **only** called from "End session" (`ChatSafetyHeader.tsx:32`), fire-and-forget (`console.warn` on failure). The session built at finalize has **hardcoded metadata**: `status: "extracted", mood: 5, moodLabel: "grounded", reframe: null` (`ChatSafetyHeader.tsx:34-41`).
+- `saveSession` → `POST /session` upsert, real handler. But **only** called from "End session" (`ChatSafetyHeader.tsx:32`), fire-and-forget (`console.warn` on failure). **✅ 2026-08-15 lanjutan (P1-4):** metadata session kini dihasilkan `generateIntisari(messages)` (`src/features/chat/lib/intisari.ts`, rule-based) — topic keywords + mood cues + reframe template → `{excerpt, mood, moodLabel, reframe}` menggantikan hardcoded `{mood:5, moodLabel:"grounded", reframe:null}` (`ChatSafetyHeader.tsx:34-41`).
 
-### 2.3 STUB/PARTIAL — Kanban status changes never persist
-- Drag between columns → `setStatus` (`sessionStore.ts:141-144`) mutates only Zustand + localStorage. No backend call; no PATCH endpoint exists. **A drag from "Pending" to "Extracted" is lost on another device.**
+### 2.3 ✅ FIXED (Phase B 2026-08-15) — Kanban status changes persist
+- `sessionStore.setStatus` kini fire-and-forget `apiClient.saveSession` (POST /session upsert by id) → status drag survives reload/hydrate (`sessionStore.ts`, WORK-LIST 2.6).
 
-### 2.4 BROKEN — Session detail shows no chat history
-- `SessionDetailPage.tsx:11` reads only summary fields from `sessionStore`. Never touches `chatStore`/backend.
-- Backend **writes** `chat_turns` (`chatTurn.ts:197`) but **no read endpoint exists** — history is unrecoverable from the UI.
-- "Continue similar conversation" (`SessionDetailPage.tsx:71`) navigates to `/chat` with **no session ID**.
+### 2.4 ✅ FIXED (Phase B 2026-08-15) — Session detail shows the real chat transcript
+- New `GET /api/v1/session/:id/turns` (`lambda/handlers/turns.ts:25-70`, baca `chat_turns`), routed `handler.ts:112-115`; `apiClient.listSessionTurns`; `SessionDetailPage` render transkrip (bubbles + timestamps + injected-memory count).
+- "Continue similar conversation" → `/chat?session=<id>` (chatStore `setActiveSession`).
 
-### 2.5 ✅ FIXED — Export: dead client path + backend now returns 501
-- `apiClient.exportBundle` (`apiClient.ts:276-286`) → `POST /export`; caller `uploadExportBundle()` (`src/features/privacy/lib/exportBundle.ts:70`) still has **zero callers** (dead code).
-- **Fix (done):** `lambda/handlers/export.ts:22-30` now returns **501 "Export upload is not implemented."** instead of a fake `s3Url: "https://s3.amazonaws.com/..."` — clients get an honest error rather than a silent false-success.
+### 2.5 ✅ FIXED (Phase B 2026-08-15) — Export now real S3 upload (was 501)
+- `lambda/handlers/export.ts` kini membangun bundle penuh (sessions/memories/edges/turns/audit) dan upload ke S3 (AES256) via `S3ClientService` → presigned GET URL 24h; 501 hanya bila `S3_BUCKET` unset.
+- `ExportBuilder.tsx:78-92` — tombol "Upload to S3" → `uploadExportBundle` (sebelumnya dead code).
 
 ### 2.6 REAL (local) — CompareModal, MoodSparkline
 - `CompareModal.tsx` genuinely compares two store sessions; `MoodSparkline.tsx` computes real SVG from store `mood`. Both operate on store data (may be seed/demo until hydrate).
@@ -90,24 +94,26 @@ Fixed fake IDs (`ses_slack`, `ses_kitchen`, …), 2026 timestamps, scripted CBT 
 - `finishPurge` → `deleteMemory` → `DELETE /memory/:id` → real SQL (`memory.ts:199-202`), edges cascade. Fire-and-forget.
 - Misleading banner at `GraphCanvas.tsx:119`: "Memory burned locally" — it *does* hit the server.
 
-### 3.3 PARTIAL — upsertMemory (edges only)
-- Only write reaching the backend besides purge: `linkNodes` upserts `edge` (`memoryStore.ts:235-239`). No node upsert from UI.
+### 3.3 ✅ FIXED (Phase B 2026-08-15) — upsertMemory (nodes + edges)
+- Semua edit path kini sync ke backend via `syncNode` → `upsertMemory` (node body): `moveNode`/`touch`/`verify`/`updateNode`/`addNode`. Bukan lagi local-only.
+- `unlink` → `DELETE /api/v1/memory/edge/:id` baru (`memory.ts` + routing) — edge tidak resurrect setelah hydrate.
+- **Follow-up tersisa:** FK `23503` (link 2 node yang belum ada di server) belum di-catch → masih bisa 500 (`memory.ts:173-176` hanya catch `23505`).
 
-### 3.4 DEAD — searchMemory
-- `apiClient.searchMemory` (`apiClient.ts:239-249`) + backend `semanticSearch.ts` implemented, **zero callers** in `src/`.
+### 3.4 ✅ FIXED (Phase B 2026-08-15) — searchMemory wired
+- `apiClient.searchMemory` (GET `/memory/semantic`) kini punya caller: `MemoryPage` search box debounce 400ms → hasil chip clickable; fallback substring lokal.
 
-### 3.5 PARTIAL — drag/position persists only to localStorage
-- `moveNode` (`memoryStore.ts:206-209`) local-only; **overwritten by next successful `hydrate()`** which replaces all nodes from server.
+### 3.5 ✅ FIXED (Phase B 2026-08-15) — drag/position persists to backend
+- `moveNode` kini sync via `syncNode` → `upsertMemory`; tidak lagi overwritten oleh hydrate.
 
-### 3.6 DEAD — node creation from UI
-- **No `addNode`/`createNode` action exists**; GraphToolbar has only zoom/fit/reset. Only possible node source is seed data or manual DB insert.
+### 3.6 ✅ FIXED (Phase B 2026-08-15) — node creation from UI
+- `memoryStore.addNode` + tombol "Add memory" di `GraphToolbar` + `AddMemoryModal` dialog (title/excerpt, Enter submit, Escape close).
 
-### 3.7 STUB — NodeInspector edit / verify / touch / recall
-- `updateNode`, `verify`, `touch`, `touchRecall` (`memoryStore.ts:267-287`) all local-only; overwritten on next hydrate. `touchRecall` bumps `references` locally; backend `ref_count` never incremented.
+### 3.7 ✅ FIXED (Phase B 2026-08-15) — NodeInspector edit / verify / touch / recall persist
+- `updateNode`/`verify`/`touch`/`touchRecall` kini sync via `syncNode` → `upsertMemory` (node body); `touchRecall` menaikkan `references` dan tersinkron ke backend `ref_count`.
 
-### 3.8 BROKEN — unlink edge is visual-only
-- `unlink` (`memoryStore.ts:245`) filters local edges; no edge-delete endpoint exists. Edge **remains in CockroachDB and reappears after next hydrate**.
-- Edge-case bug: linking two seed-only nodes triggers FK `23503` (source/target not in DB); catch only swallows `23505` (unique) → 500 (`memory.ts:173-176`).
+### 3.8 ✅ FIXED (Phase B 2026-08-15) — unlink edge real (endpoint baru)
+- `unlink` memanggil `DELETE /api/v1/memory/edge/:id` — edge dihapus dari CockroachDB, tidak reappear setelah hydrate.
+- Edge-case FK `23503` (link dua seed-only node) **masih bisa 500** — hanya `23505` (unique) yang di-catch (`memory.ts:173-176`). Open follow-up.
 
 ### 3.9 PurgeZone — node purge REAL; full user purge ✅ FIXED
 - Node purge (`deleteMemory`) remains REAL (`memoryStore.ts:271`, `memory.ts:199-202`).
@@ -117,16 +123,16 @@ Fixed fake IDs (`ses_slack`, `ses_kitchen`, …), 2026 timestamps, scripted CBT 
   `{ v:1, ok:true, deletedRows:{chatTurns,memoryEdges,memoryNodes,sessions,users} }`, 500 on error. `hardPurgeLocalData` now calls
   `apiClient.purge("hard-purge", …)` (see §6) and `lambda/lib/crdb.ts:44` gained `executeCount()`.
 
-### 3.10 DEAD — `coreMemories()` (`memoryStore.ts:297`), `nodeScale()` (`types.ts:43`)
+### 3.10 DEAD (masih open) — `coreMemories()` (`memoryStore.ts:347`), `nodeScale()` (`types.ts:43`)
 
 ---
 
 ## 4. Auth / Onboarding — `/auth`, `/onboarding`
 
 ### 4.1 PARTIAL — Passkey
-- `passkey.ts:22-43` real `navigator.credentials.create({ publicKey })`. **No `navigator.credentials.get()` anywhere** → every sign-in mints a new credential; no login.
+- `passkey.ts:22-43` real `navigator.credentials.create({ publicKey })`. **No `navigator.credentials.get()` anywhere** (verified 2026-08-15, grep 0 hits) → every sign-in mints a new credential; no login ceremony.
 - Fake fallback `mintLocalDeviceKey` (`passkey.ts:56-59`) mints a random hex string; wired at `PasskeyPanel.tsx:57-60` ("Sandbox has no platform authenticator…"), cosmetic 900ms wait.
-- Backend hardcodes identity: every user upserted as `'device-user'` / `'passkey'` (`chatTurn.ts:151-154`, `memory.ts:222-225`, `session.ts:161-164`).
+- Backend hardcodes identity: user upsert `'device-user'` / `'passkey'` hanya di legacy/passkey path (`chatTurn.ts:151-152`, `memory.ts:245-246`, `session.ts:161-162`); magic-link path kini pakai email prefix (`auth.ts:198-203`).
 
 ### 4.2 ✅ FIXED (token hardening + server-backed transport) — Magic link
 - **Was:** `authStore.issueMagicLink` stored the token in memory only; token = `uid()` = `Math.random().toString(36)` (**not crypto-safe**), no expiry; `MagicLinkForm.tsx:48-51` admits "There is no mail server in this build."
@@ -139,12 +145,13 @@ Fixed fake IDs (`ses_slack`, `ses_kitchen`, …), 2026 timestamps, scripted CBT 
 ### 4.4 REAL (local only) — Onboarding persistence
 - `finishOnboarding` (`authStore.ts:130-134`) sets status `onboarded` if consent + ≥1 goal; persisted to localStorage. Nothing written to backend at onboarding.
 
-### 4.5 STUB — AuthCallbackPage
-- `authStore.consumeMagicLink` (`authStore.ts:78-83`) is a local `===` against the stored token. No server verification, no expiry. Copy "Validating the one-time token on this device" overstates a local comparison.
+### 4.5 ✅ FIXED (Phase C 2026-08-15) — AuthCallbackPage real server verification
+- `authStore.consumeMagicLink` kini async server-first: `POST /api/v1/auth/callback` (server verify hash/expiry/reuse → upsert users → kembalikan `session_token`); dev-mode fallback ke perbandingan lokal tetap ada.
+- Copy "Validating the one-time token on this device" masih agak overstated untuk dev-mode; live server path benar.
 
-### 4.6 STUB/PARTIAL — SessionGate
-- Gates on `localStorage["cbt-memory-agent-auth"].status` string. **No token validation, expiry, or server check** — editing localStorage bypasses auth. (Now that §4.8 is fixed, the persisted `status` at least restores across reloads.)
-- `getAuthHeaders` (`authSession.ts:14-18`) uses `profile.id` as bearer token; backend `lambda/middleware/auth.ts:30-35` now rejects malformed tokens (length<8/whitespace → 401) but still accepts **any well-formed non-empty token** as `userId = token` — real CRDB verification remains TODO.
+### 4.6 PARTIAL — SessionGate
+- Gates on `localStorage["cbt-memory-agent-auth"].status` string (local UI gate; bukan security boundary).
+- `getAuthHeaders` (`authSession.ts:14-18`) kini pakai `profile.sessionToken ?? profile.id` sebagai bearer; backend `lambda/middleware/auth.ts:41-42` kini `validateAuth` async → `SELECT id FROM users WHERE session_token=$1` → identity dari DB. **Legacy fallback masih ada** (`middleware/auth.ts:53-54` → `userId = token`) agar sesi lama tetap jalan — jadi token non-DB yang well-formed masih diterima. Live Lambda belum deploy schema `session_token` (Phase C pending).
 
 ### 4.7 MISLEADING copy
 - `AuthShell.tsx:6` "session material never leave this browser profile" / `AuthPage.tsx:25` "session key never leaves this device" — but chat turns, memories, sessions **are** uploaded to CRDB/AWS under `profile.id`.
@@ -168,16 +175,15 @@ Fixed fake IDs (`ses_slack`, `ses_kitchen`, …), 2026 timestamps, scripted CBT 
 - `CrisisHaltBridge.tsx` — real; watches `appStore.crisisActive` → `hardHalt()` (streaming/recording/cameraOpen false).
 - `BreathingCircle.tsx` — real 4-7-8 phase machine (setTimeout/setInterval, framer-motion scale, pointer hold, cycle count).
 - `GroundingGame.tsx` — real dnd-kit drag 5 tokens onto pads; completion → `onComplete`.
-- `CalmingAudio.tsx:20-38` — real WebAudio oscillators (174Hz+180Hz, **no asset files exist**; but mixed into one GainNode → monophonic 6Hz beat, **not true binaural** — no L/R panning).
+- `CalmingAudio.tsx` — real WebAudio, **✅ kini true binaural (Phase A 2026-08-15):** tiap oscillator → `StereoPannerNode` sendiri (pan = −1 / +1) sebelum shared gain → beat 6Hz stereo beneran (bukan monophonic).
 - `SwipeToCall.tsx` — real `tel:` navigation gated on ≥88% drag; `988` (US) and `119` (ID) correct.
 - `CrisisOverlay.tsx` — real flow: focus trap + Escape-block, emergency-contact `tel:` gated on `emergency.notify`, `tel:988`/`sms:119`, UGD map search; exit disabled until grounded. Logs `CRISIS_ENGAGED`/`CRISIS_DISMISSED` to local audit store only — **no backend `/crisis` endpoint**.
-- `ChatSafetyHeader` session timer (`:21-25`) measures **header mount duration** only (resets on navigation). End session builds hardcoded mood (see 2.2).
-
----
+- `ChatSafetyHeader` session timer (`:21-25`) measures **header mount duration** only (resets on navigation). End session builds mood via `generateIntisari` (see 2.2).
+- **✅ 2026-08-15 lanjutan (P1-3) — crisis fusion multimodal:** `src/features/crisis/lib/crisisFusion.ts` — `computeCrisisScore({text, prosody, face})` = text×0.5 + prosody×0.3 + face×0.2, threshold > 0.7; desain konservatif (face/prosody saja tak bisa trigger). `CrisisFusionBridge` (mount di `AppShell`) poll 500ms → `triggerCrisis` bila lintas threshold; `distressHint` single-writer (komponen ini), `computeDistressHint()` menerima fallback luma bila confidence > 0.7. Input: teks user terakhir + `chatStore.prosody` (RMS live, dari audio worker saat recording) + `chatStore.face` (MediaPipe).
 
 ## 6. Settings / Privacy — `/settings/privacy` (no dedicated `src/features/settings`)
 
-- **ExportBuilder / `buildExportBundle`** (`exportBundle.ts:11-53`) — REAL: assembles chat/mood/memory from stores → local JSON download. Server upload path DEAD + backend STUB (see 2.5).
+- **ExportBuilder / `buildExportBundle`** (`exportBundle.ts:11-53`) — REAL: assembles chat/mood/memory from stores → local JSON download. **✅ Phase B:** tombol "Upload to S3" → `uploadExportBundle` (`ExportBuilder.tsx:78-92`); backend `POST /export` real (bundle → S3 AES256 → presigned URL, 501 hanya jika `S3_BUCKET` unset).
 - **DestructionKey / `hardPurgeLocalData`** (`hardPurge.ts:33-60`) — REAL local wipe (allowlisted `cbt-*` keys, verify, retry, sign out). **✅ FIXED:** now `async`, awaits `wipeAllApiKeys()` (clears IndexedDB BYOK keys, fail-open try/catch) then best-effort `apiClient.purge("hard-purge", auth.token, auth.deviceId)` with a failure toast ("Server data not purged") + `console.warn`. `DestructionKey.tsx:116` calls `void hardPurgeLocalData().finally(() => navigate('/auth'))`. Server `/purge` now real (see 3.9).
 - **LlmPanel / BYOK** (`byokKeyManager.ts`) — REAL: IndexedDB + WebCrypto AES-GCM, real test-connection fetch. 24 providers from `llmRegistry.ts`.
 - **SessionTable / privacyStore** (`privacyStore.ts:13-38`) — FAKE data: `seedDevices` hardcoded ("This browser", "Clinic iPad — Supervision room", "Shared workstation — Admin desk"). `revoke` only filters local array; current-device revoke signs out locally via BroadcastChannel. **No backend device/session management exists.**
@@ -186,24 +192,25 @@ Fixed fake IDs (`ses_slack`, `ses_kitchen`, …), 2026 timestamps, scripted CBT 
 
 ---
 
-## 7. Backend Lambda TODO stubs (updated after fixes)
+## 7. Backend Lambda TODO stubs (updated after fixes + Phase B/C)
 
 | Endpoint | Location | Status |
 |---|---|---|
-| `POST /export` (S3 upload) | `lambda/handlers/export.ts:22-30` | ✅ now **501** "Export upload is not implemented." (honest error, no fake `s3Url`) |
-| `POST /purge` | `lambda/handlers/purge.ts:17-40` | ✅ now **REAL** (confirmation-gated per-user `DELETE`, returns `deletedRows`) |
-| `/metrics` | `lambda/handlers/health.ts:39` | `// TODO: Implement`, empty arrays |
-| Auth validation | `lambda/middleware/auth.ts:30-35` | **partial fix:** malformed tokens rejected (length<8/whitespace → 401); still accepts any well-formed non-empty token (`userId = token`) — real CRDB verification still TODO |
-| CORS | `lambda/handler.ts:126-131` | ✅ fail-loud: `console.warn` when `ALLOWED_ORIGIN` unset (still falls back to `*`) |
-| Read chat_turns endpoint | none | **missing** — written but unreadable |
+| `POST /export` (S3 upload) | `lambda/handlers/export.ts` | ✅ **REAL (Phase B)** — bundle → S3 AES256 → presigned URL 24h; 501 hanya bila `S3_BUCKET` unset |
+| `POST /purge` | `lambda/handlers/purge.ts:17-40` | ✅ **REAL** (confirmation-gated per-user `DELETE`, returns `deletedRows`) — masih belum menulis `HARD_PURGE` ke `audit_events` |
+| `/metrics` | `lambda/handlers/health.ts:34-110` | ✅ **REAL (Phase B)** — aggregasi per-user: sessions by status, memory counts/confidence/refs, chat_turns, `audit_events` grouped, crisis counts |
+| `GET /session/:id/turns` | `lambda/handlers/turns.ts:25-70` | ✅ **REAL (Phase B)** — baca `chat_turns`, routed `handler.ts:112-115` |
+| `DELETE /memory/edge/:id` | `lambda/handlers/memory.ts` | ✅ **REAL (Phase B)** — edge-delete, routed; FK `23503` follow-up open |
+| `POST /auth/magic-link`, `/auth/callback` | `lambda/handlers/auth.ts` | ✅ **REAL (Phase C)** — Resend email, `auth_tokens` table, `session_token` upsert; **deployment ke live belum diverifikasi** |
+| Auth validation | `lambda/middleware/auth.ts:41-42,53-54` | 🔶 **partial:** kini async `SELECT id FROM users WHERE session_token=$1` (identity dari DB); malformed rejected (401); **legacy `profile.id` fallback masih ada**; live schema belum apply |
+| CORS | `lambda/handler.ts:149-156` | 🔶 fail-loud: `console.warn` saat `ALLOWED_ORIGIN` unset (masih fallback `*`; tfvars masih `"*"`) |
 
 ## 8. Dead code / console stubs (fire-and-forget masking)
 
-- `metrics.ts:16-60` — 8 crisis metric wrappers defined, **never called** (only `metric.purgeFromGraph`, `metric.streamDone` used).
-- `uploadExportBundle` / `apiClient.exportBundle` — DEAD.
-- `apiClient.searchMemory` — DEAD. `apiClient.purge` — DEAD.
-- `coreMemories()`, `nodeScale()` — DEAD.
-- Backend sync failures swallowed with `console.warn` in 4 files (`chatStore.ts:231`, `sessionStore.ts:166`, `memoryStore.ts:239,262`, `exportBundle.ts:79`).
+- `metrics.ts:16-60` — 7 crisis metric wrappers defined, **never called** (hanya `metric.purgeFromGraph`, `metric.streamDone`, `metric.graphLinkCreated`, `metric.exportSuccess` yang dipakai). `CrisisOverlay` pakai `auditStore.log` langsung → angka krisis di Metrics selalu 0.
+- `coreMemories()` (`memoryStore.ts:347`), `nodeScale()` (`types.ts:43`) — DEAD (nol caller).
+- ✅ `uploadExportBundle` / `apiClient.exportBundle` — **sekarang LIVE** (Phase B, `ExportBuilder.tsx:82`). ✅ `apiClient.searchMemory` — **LIVE** (2.1). ✅ `apiClient.purge` — **LIVE** (hard purge).
+- Backend sync failures swallowed with `console.warn` (fire-and-forget pattern tetap ada di beberapa path).
 
 ---
 
@@ -211,12 +218,13 @@ Fixed fake IDs (`ses_slack`, `ses_kitchen`, …), 2026 timestamps, scripted CBT 
 
 | # | Fix | Status |
 |---|---|---|
-| 1 | **Fix the LLM fallback short-circuit** (make `callOnDeviceLLM` throw when WebLLM isn't loaded) | ✅ **DONE** (§1.1) |
+| 1 | **Fix the LLM fallback short-circuit** (make `callOnDeviceLLM` throw when WebLLM isn't loaded) | ✅ **DONE** (§1.1) + Phase A: WebLLM real (`onDeviceLLM.ts`) |
 | 2 | **Fix auth persistence** (real `merge` in `createVersionedPersist` that unpacks `data`) | ✅ **DONE** (§4.8) |
-| 3 | **Fix magic-link double-consume** (run-once guard; treat already-authenticated as success) | ✅ **DONE** (§4.9); also token hardened to `crypto.getRandomValues` + 10-min expiry (§4.2) |
-| 4 | Wire `startAudioWorker` into `HoldToTalkOrb` with graceful failure | ⬜ OPEN (§1.2) |
-| 5 | Stop presenting seed/demo data as real: empty states instead of seeds on hydrate failure | ✅ **DONE** (`memoryStore.ts:207-211`, `sessionStore.ts:141-144` — both set `[]` + `hydrateError`) |
-| 6 | Persist Kanban status + edge/node edits; implement `searchMemory` + `addNode` or remove | ⬜ OPEN (§2.3/§3.4/§3.6) |
-| 7 | Implement server purge/export/auth-validation; wire into hardPurge; add `GET /turns`; set `ALLOWED_ORIGIN`; rate limiting | 🔶 **PARTIAL** — purge real + export 501 + auth malformed-check + `wipeAllApiKeys` wired + `apiClient.purge` wired; `GET /turns`, real token verification, `ALLOWED_ORIGIN` set, rate limiting still open |
+| 3 | **Fix magic-link double-consume** (run-once guard; treat already-authenticated as success) | ✅ **DONE** (§4.9); token hardened (§4.2) + **server-backed via Resend (Phase C, §4.2/§4.5)** — deployment live belum diverifikasi |
+| 4 | Wire `startAudioWorker` into `HoldToTalkOrb` with graceful failure | ✅ **DONE (Phase A §1.2)** — voice notes real (`voiceNote.ts`, Whisper tiny transkrip) |
+| 5 | Stop presenting seed/demo data as real: empty states instead of seeds on hydrate failure | ✅ **DONE** (`memoryStore.ts:207-211`, `sessionStore.ts:141-144`); *initial* seed di store baru masih demo (4.7 open) |
+| 6 | Persist Kanban status + edge/node edits; implement `searchMemory` + `addNode` | ✅ **DONE (Phase B)** — 2.3/2.6/2.7/3.3-3.8 di atas |
+| 7 | Implement server purge/export/auth-validation; wire into hardPurge; add `GET /turns`; set `ALLOWED_ORIGIN`; rate limiting | 🔶 **PARTIAL** — purge real + export real S3 + `GET /turns` + token verification (`session_token`) done (Phase B/C); `ALLOWED_ORIGIN` masih `*`, rate limiting + server audit open |
 | 8 | Web-quality fixes: contrast, `aria-label` on file input + sessions `<select>`, `public/robots.txt` | ✅ **DONE** (see WEB-QUALITY-AUDIT.md §7) |
-| 9 | Remove/annotate fake face worker + TTS badge | 🔶 **PARTIAL** — TTS badge fixed (§1.7); fake face worker (§1.3) still present, annotated |
+| 9 | Remove/annotate fake face worker + TTS badge | ✅ **DONE** — face worker kini real MediaPipe (§1.3); TTS badge jujur (§1.7); CalmingAudio true binaural (§5) |
+| 10 | Phase C/D tersisa | passkey `credentials.get()`, privacy copy, device registry, rate limit + `audit_events` INSERT, CSP handler, code splitting, Lighthouse prod, deploy Phase C ke live, bersihkan us-east-1 orphan |

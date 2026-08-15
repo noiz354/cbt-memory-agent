@@ -1,4 +1,5 @@
 import { CrisisHaltBridge } from "@/features/crisis/components/CrisisHaltBridge";
+import { CrisisFusionBridge } from "@/features/crisis/components/CrisisFusionBridge";
 import { CrisisOverlay } from "@/features/crisis/components/CrisisOverlay";
 import { MobileDock } from "@/app/layout/MobileDock";
 import { Sidebar } from "@/app/layout/Sidebar";
@@ -20,6 +21,7 @@ export function AppShell() {
       </main>
       <MobileDock />
       <CrisisHaltBridge />
+      <CrisisFusionBridge />
       <CrisisOverlay />
       <CommandPalette />
       <ToastHost />

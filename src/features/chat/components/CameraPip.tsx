@@ -13,7 +13,6 @@ export function CameraPip() {
   const face = useChatStore((s) => s.face);
   const setFace = useChatStore((s) => s.setFace);
   const attachSnapshot = useChatStore((s) => s.attachSnapshot);
-  const setDistressHint = useAppStore((s) => s.setDistressHint);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
@@ -28,7 +27,7 @@ export function CameraPip() {
       streamRef.current?.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
       stopFaceWorker();
-      setDistressHint(false);
+      setFace({ expression: "neutral", confidence: 0.42, updatedAt: Date.now(), model: "fallback" });
       return;
     }
 
@@ -48,10 +47,18 @@ export function CameraPip() {
           videoRef.current.srcObject = stream;
           await videoRef.current.play();
         }
-        startFaceWorker(videoRef.current, (signal) => {
-          setFace(signal);
-          setDistressHint(signal.expression === "distressed" && signal.confidence > 0.7);
-        });
+        // distressHint is owned by CrisisFusionBridge (single writer); this
+        // component only publishes the raw face signal into the store.
+        startFaceWorker(
+          videoRef.current,
+          (signal) => setFace(signal),
+          () => {
+            const { recording, isStreaming } = useChatStore.getState();
+            if (useAppStore.getState().crisisActive) return "crisis";
+            if (recording || isStreaming) return "active";
+            return "idle";
+          },
+        );
       } catch {
         setCameraOpen(false);
       }
@@ -62,7 +69,7 @@ export function CameraPip() {
       streamRef.current?.getTracks().forEach((t) => t.stop());
       stopFaceWorker();
     };
-  }, [cameraOpen, setCameraOpen, setDistressHint, setFace]);
+  }, [cameraOpen, setCameraOpen, setFace]);
 
   const capture = () => {
     const video = videoRef.current;

@@ -206,8 +206,8 @@ Achieved on dev (pre-fix): perf 57, a11y 90–96, BP 100, SEO 80–91. **After t
 | 3 | High | `aria-label` on the sessions filter `<select>` | `SessionsPage.tsx` | clears `select-name` on /sessions | ✅ **DONE** — `aria-label="Filter sessions by status"` (`SessionsPage.tsx:103`) |
 | 4 | Medium | Add `public/robots.txt` (+ optional sitemap) | new file `public/robots.txt` | clears `robots-txt`, SEO → ≈100 | ✅ **DONE** — `public/robots.txt` (`User-agent: *` / `Disallow:`) |
 | 5 | Medium | Re-run audit against production build (`npm run build` + `vite preview`) to get real perf numbers | — | validates CWV | ⬜ open |
-| 6 | Low | Evaluate route-level code splitting of `main.tsx` static imports for the prod bundle | `src/main.tsx`, `src/app/router.tsx` | reduces prod JS per page | ⬜ open |
-| 7 | Low | Consider CSP + security headers (not a Lighthouse failure today) | `index.html`, Lambda `corsHeaders()` | defense-in-depth for clinical data | ⬜ open (Lambda CORS now fail-loud on `ALLOWED_ORIGIN`, see SECURITY-AUDIT §2.1) |
+| 6 | Low | Evaluate route-level code splitting of `main.tsx` static imports for the prod bundle | `src/main.tsx`, `src/app/router.tsx` | reduces prod JS per page | ⬜ open (verified 2026-08-15: `router.tsx:3-11` masih statik import semua 9 page, nol `React.lazy`) |
+| 7 | Low | Consider CSP + security headers (not a Lighthouse failure today) | `index.html`, Lambda `corsHeaders()` | defense-in-depth for clinical data | 🔶 **partial:** nginx sudah set `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`, dan full CSP (`nginx.conf:45-49`); yang tersisa: CSP meta `index.html` + headers di Lambda `corsHeaders()` (lihat SECURITY-AUDIT §2.1/§2.5) |
 
 > **After the §7 fixes**, expected delta: a11y on `/chat`/`/sessions`/`/settings` up several points (contrast nodes + 2 labels cleared),
 > SEO on every page up from 80/91 → ~100 (`robots-txt` cleared). Perf is unchanged (dev server) until a prod-build re-run (#5).

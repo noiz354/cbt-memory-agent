@@ -13,8 +13,22 @@ let engine: webllm.MLCEngine | null = null;
 let initPromise: Promise<webllm.MLCEngine> | null = null;
 let progress = 0;
 
+type ProgressListener = (p: number) => void;
+const listeners = new Set<ProgressListener>();
+
 export function getOnDeviceLoadProgress(): number {
   return progress;
+}
+
+export function subscribeOnDeviceProgress(cb: ProgressListener): () => void {
+  listeners.add(cb);
+  cb(progress);
+  return () => listeners.delete(cb);
+}
+
+function setProgress(p: number): void {
+  progress = p;
+  listeners.forEach((cb) => cb(progress));
 }
 
 function initEngine(): Promise<webllm.MLCEngine> {
@@ -22,17 +36,24 @@ function initEngine(): Promise<webllm.MLCEngine> {
   if (!initPromise) {
     initPromise = (async () => {
       const e = new webllm.MLCEngine();
-      progress = 0;
-      await e.reload(MODEL_ID, {
-        initProgressCallback: (p) => {
-          progress = p.progress;
-        },
-      });
+      e.setInitProgressCallback((p) => setProgress(p.progress));
+      setProgress(0);
+      await e.reload(MODEL_ID);
       engine = e;
+      setProgress(1);
       return e;
     })();
   }
   return initPromise;
+}
+
+/** Kick off the model download without waiting on it. Safe to call repeatedly. */
+export function preloadOnDeviceEngine(): Promise<webllm.MLCEngine> {
+  return initEngine();
+}
+
+export function isOnDeviceEngineReady(): boolean {
+  return engine !== null;
 }
 
 /**

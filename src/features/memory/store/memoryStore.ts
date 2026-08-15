@@ -355,7 +355,15 @@ function syncNode(node: GraphNode | undefined) {
   if (!auth) return;
   const { references, lastTouched, ...bodyNode } = node;
   apiClient.upsertMemory(
-    { v: 1, action: "upsert", node: bodyNode },
+    {
+      v: 1,
+      action: "upsert",
+      node: {
+        ...bodyNode,
+        confidence: bodyNode.confidence ?? bodyNode.weight,
+        verified: bodyNode.verified ?? false,
+      },
+    },
     auth.token,
     auth.deviceId,
   ).catch((err) => console.warn("[API] Failed to sync node to backend:", err));

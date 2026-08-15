@@ -4,6 +4,8 @@
 > Scope: authentication, authorization, data-at-rest, data-in-transit, secrets handling, privacy claims, purge/export, supply chain.
 > Legend: **BROKEN** = actively insecure · **HIGH** = meaningful risk · **MED** = hardening gap · **LOW** = cosmetic/defensive · **OK** = correctly done.
 > **Status note (2026-08-15, same session):** items marked ✅ were remediated after this audit; see §7 for the follow-up log.
+> **Status note (2026-08-15, later — Phase C):** server-backed magic-link + real `session_token` verification implemented (see §2.4, §7.10);
+> deployment ke Lambda live belum diverifikasi (schema `auth_tokens`/`users.session_token` + env `RESEND_API_KEY` belum di-apply).
 
 ---
 
@@ -11,24 +13,24 @@
 
 | # | Finding | Severity | Location | Status |
 |---|---|---|---|---|
-| 1.1 | Backend accepts **any non-empty token**; no real authN/authZ | **BROKEN** | `lambda/middleware/auth.ts:23-27` | 🔶 partially hardened (malformed rejected; real verification still TODO) |
-| 1.2 | Frontend "token" is the user id itself (`profile.id`), minted locally | **BROKEN** | `authSession.ts:14-18`, `authStore.ts` | ⬜ open |
+| 1.1 | Backend accepts **any non-empty token**; no real authN/authZ | **BROKEN** | `lambda/middleware/auth.ts:23-27` | 🔶 **Phase C:** `validateAuth` kini async `SELECT id FROM users WHERE session_token=$1` → identity dari DB; malformed ditolak; **legacy `profile.id` fallback masih ada** (`auth.ts:53-54`) + live schema belum apply |
+| 1.2 | Frontend "token" is the user id itself (`profile.id`), minted locally | **BROKEN** | `authSession.ts:14-18`, `authStore.ts` | 🔶 **partial:** `getAuthHeaders` kini prefer `sessionToken` (server-issued) atas `profile.id`; `profile.id` masih jadi fallback |
 | 1.3 | Auth session does **not survive reload** (persist rehydration broken) | HIGH | `versionedPersist.ts`, `authStore.ts` | ✅ fixed (§7.1) |
-| 1.4 | Magic-link token is `Math.random()` (predictable) + single-use broken by double-consume | HIGH | `format.ts:17`, `AuthCallbackPage.tsx` | ✅ fixed (§7.2) |
-| 1.5 | Passkey: real `create()` but **no `credentials.get()`** (no login) + insecure fallback | HIGH | `passkey.ts`, `PasskeyPanel.tsx` | ⬜ open |
+| 1.4 | Magic-link token is `Math.random()` (predictable) + single-use broken by double-consume | HIGH | `format.ts:17`, `AuthCallbackPage.tsx` | ✅ fixed (§7.2) + server-backed via Resend (Phase C, §7.10) |
+| 1.5 | Passkey: real `create()` but **no `credentials.get()`** (no login) + insecure fallback | HIGH | `passkey.ts`, `PasskeyPanel.tsx` | ⬜ open (verified 2026-08-15: grep `credentials.get` = 0) |
 | 1.6 | Privacy copy is **false** ("never leaves this device") while data is uploaded to CRDB/AWS | HIGH | `AuthShell.tsx:6`, `AuthPage.tsx:25` | ⬜ open |
-| 2.1 | CORS default `Access-Control-Allow-Origin: *` | MED | `handler.ts:127` | 🔶 fail-loud warn added; default still `*` |
+| 2.1 | CORS default `Access-Control-Allow-Origin: *` | MED | `handler.ts:149-156` | 🔶 fail-loud warn added; default masih `*` (`terraform.tfvars:16`) |
 | 2.2 | Hard purge deletes localStorage but **not IndexedDB BYOK keys** and **not server data** | MED | `hardPurge.ts`, `byokKeyManager.ts` | ✅ fixed (§7.3) |
-| 2.3 | `/purge` and `/export` backend endpoints are unimplemented stubs | MED | `purge.ts:16`, `export.ts:18` | ✅ fixed (§7.4) |
-| 2.4 | No rate limiting / no audit trail server-side | MED | `handler.ts` (all) | ⬜ open |
-| 2.5 | No CSP / security headers | MED | `index.html`, `handler.ts:125-131` | ⬜ open |
+| 2.3 | `/purge` and `/export` backend endpoints are unimplemented stubs | MED | `purge.ts:16`, `export.ts:18` | ✅ fixed (§7.4); export kini real S3 (Phase B) |
+| 2.4 | No rate limiting / no audit trail server-side | MED | `handler.ts` (all) | ⬜ open (verified: nol 429/rateLimit; `audit_events` zero INSERT) |
+| 2.5 | No CSP / security headers | MED | `index.html`, `handler.ts` | 🔶 **partial:** nginx sudah set X-CTO/XFO/Referrer/CSP (`nginx.conf:45-49`); index.html meta + Lambda handler masih open |
 | 3.1 | `.env` correctly gitignored | OK | `.gitignore:27-29` | — |
 | 3.2 | BYOK keys encrypted at rest (WebCrypto AES-GCM) in IndexedDB | OK* | `byokKeyManager.ts` | — |
 | 3.3 | LLM API keys never logged/console'd; not in localStorage | OK | `byokKeyManager.ts` | — |
 | 3.4 | Health endpoint deliberately unauthenticated | OK | `handler.ts:51` | — |
-| 4.1 | User display name hardcoded server-side as `'device-user'` | LOW | `chatTurn.ts:151-154` | ⬜ open |
+| 4.1 | User display name hardcoded server-side as `'device-user'` | LOW | `chatTurn.ts:151-154` | 🔶 **partial:** magic-link path kini email prefix (`auth.ts:198-203`); passkey/legacy masih `'device-user'` |
 | 4.2 | `credentialId` never used for anything | LOW | `authStore.ts` | ⬜ open |
-| 4.3 | Seed demo data presented as real user data | LOW | `sessionStore/memoryStore/chatStore/privacyStore` | 🔶 hydrate-failure path fixed (empty states); initial seed remains |
+| 4.3 | Seed demo data presented as real user data | LOW | `sessionStore/memoryStore/chatStore/privacyStore` | 🔶 hydrate-failure path fixed (empty states); initial seed masih demo (4.7 open) |
 
 \* OK with a caveat — see §3.2: the AES-GCM wrapping key lives in the **same** IndexedDB as the ciphertext, so it protects only against casual inspection of localStorage, not against an attacker with code execution in the origin.
 
@@ -74,7 +76,7 @@ Root cause was the versioned-persist wrapper (details in AUDIT.md §4.8):
 - **Was:** `issueMagicLink` used `uid("lnk")` → `Math.random().toString(36)` (`src/shared/lib/format.ts:17`) — not cryptographically random, no expiry; and `AuthCallbackPage.tsx`'s `useEffect` (deps included `params`, an object changing identity per render) ran **twice** — first run consumed the token, second found `magicToken === null` and showed **"Link not valid"** even though the user *is* authenticated. `magicToken` was not in the persisted slice → reload/new-tab always yielded "Link not valid".
 - **Fix 1 (client, done earlier):** `format.ts:25` adds `secureToken(prefix)` — 32 bytes `crypto.getRandomValues`, base64url. `issueMagicLink` uses `secureToken("lnk")` + sets `magicTokenExpiresAt = Date.now() + MAGIC_LINK_TTL_MS` (10 min); `consumeMagicLink` rejects expired tokens. `AuthCallbackPage.tsx:17-24` adds a `consumedRef` run-once guard and treats `status` already `authenticated`/`onboarded` as success.
 - **Fix 2 (server, done 2026-08-15 Phase C):** new backend endpoint `POST /api/v1/auth/magic-link` (public) generates a 32 B `crypto.randomBytes` token, stores its **SHA-256 hash** in the new `auth_tokens` table (10-min TTL, single-use `used_at`), and emails the sign-in link via **Resend** (plain fetch, no SDK). `POST /api/v1/auth/callback` verifies hash + expiry + reuse, marks `used_at`, upserts the `users` row with a fresh `session_token`, and returns it. `validateAuth` now does a **real DB lookup** (`SELECT id FROM users WHERE session_token=$1`) and returns the row's id — server-derived identity (resolves WORK-LIST 3.2). Frontend `getAuthHeaders` prefers `sessionToken` over `profile.id`; dev mode (`no RESEND_API_KEY`) returns `{sent:false, devUrl}` and the form keeps the on-device preview.
-- **Remaining:** deployment not yet applied — deployed Lambda needs `RESEND_API_KEY` env + the new schema (`auth_tokens` table, `users.session_token`) + redeploy (needs `aws login`). Until then live behavior is the dev-mode preview path.
+- **Remaining:** deployment not yet applied — deployed Lambda needs `RESEND_API_KEY` env + the new schema (`auth_tokens` table, `users.session_token`) + redeploy (needs `aws login`). Until then live behavior is the dev-mode preview path. Terraform wiring done (`fe98ab3`); `deploy.yml` belum kirim `TF_VAR_resend_api_key` (required var → CI apply akan gagal sampai secret ditambah).
 
 ### 2.5 HIGH — Passkey ceremony is incomplete
 - `passkey.ts:22-43` — real `navigator.credentials.create({ publicKey })`, good.
@@ -163,20 +165,23 @@ Seed sessions/memories/messages/devices (with hardcoded 2026-08-xx timestamps) a
 
 | # | Severity | Action | Status |
 |---|---|---|---|
-| 1 | BROKEN | Replace `validateAuth` with real server-side token verification bound to a `users` row (create high-entropy token at onboarding); never trust client `userId`. | ⬜ open (malformed-token rejection added only) |
+| 1 | BROKEN | Replace `validateAuth` with real server-side token verification bound to a `users` row (create high-entropy token at onboarding); never trust client `userId`. | 🔶 **Phase C done:** `validateAuth` kini async → `SELECT id FROM users WHERE session_token=$1` (`middleware/auth.ts:41-42`); server-issued `session_token` saat magic-link consume (`auth.ts:198-203`). **Tersisa:** legacy `profile.id` fallback masih diterima (`middleware/auth.ts:53-54`); live Lambda belum deploy schema/env |
 | 2 | BROKEN | Fix `versionedPersist` merge so auth survives reload; add `migrate` that unpacks `data`. | ✅ **DONE** (§7.1) |
-| 3 | HIGH | Magic-link tokens via `crypto.getRandomValues`, with expiry; fix `AuthCallbackPage` double-consume (run-once ref); add server verification. | 🔶 client side done (§7.2); server verification open |
+| 3 | HIGH | Magic-link tokens via `crypto.getRandomValues`, with expiry; fix `AuthCallbackPage` double-consume (run-once ref); add server verification. | ✅ **DONE** — client hardening (§7.2) + server-backed via Resend/`auth_tokens` (Phase C, §7.10); live deploy belum diverifikasi |
 | 4 | HIGH | Rewrite "never leaves this device" copy to match reality, or disable cloud sync. | ⬜ open |
-| 5 | HIGH | Complete the passkey flow (`credentials.get`) or remove the fake-local-key path. | ⬜ open |
-| 6 | MED | Set `ALLOWED_ORIGIN`; implement `/purge` + `/export` (or return 501); wire `wipeAllApiKeys` + server purge into hard purge; add rate limiting; add CSP/security headers. | 🔶 purge+export+wipe+purging done (§7.3/§7.4); `ALLOWED_ORIGIN` value, rate limiting, CSP open |
-| 7 | MED | Add server-side audit log + real device registry; replace `seedDevices`. | ⬜ open |
-| 8 | LOW | Stop showing seed data as real (empty states on hydrate failure); send the real display name to the server. | 🔶 hydrate-failure empty states done; initial seed + server name open |
+| 5 | HIGH | Complete the passkey flow (`credentials.get`) or remove the fake-local-key path. | ⬜ open (verified 2026-08-15: `credentials.get` = 0 match) |
+| 6 | MED | Set `ALLOWED_ORIGIN`; implement `/purge` + `/export` (or return 501); wire `wipeAllApiKeys` + server purge into hard purge; add rate limiting; add CSP/security headers. | 🔶 purge+export+wipe+purge done (§7.3/§7.4); export real S3 (Phase B); `ALLOWED_ORIGIN` masih `*`, rate limiting open, CSP partial (nginx done) |
+| 7 | MED | Add server-side audit log + real device registry; replace `seedDevices`. | ⬜ open (`audit_events` zero INSERT; no `/devices` endpoints) |
+| 8 | LOW | Stop showing seed data as real (empty states on hydrate failure); send the real display name to the server. | 🔶 hydrate-failure empty states done; initial seed + passkey/legacy name open (magic-link name done) |
 
 > **Bottom line (updated):** The two most damaging bugs are now fixed — auth **persists** across reloads (§7.1), the magic-link token is
 > crypto-random + expired with the double-consume bug gone (§7.2), hard purge actually removes IndexedDB keys **and** server rows (§7.3/§7.4),
-> and the export endpoint stops lying with a fake URL. **Remaining blockers for production/clinical use are unchanged in principle:**
-> the auth layer is still simulated end-to-end (client-minted `profile.id` accepted as a bearer token, §2.1/§2.2), the privacy copy still
-> overstates device-local processing (§2.6), and passkey has no sign-in ceremony (§2.5).
+> and the export endpoint is now a real S3 upload. **Phase C (later same day)** added a server-backed magic-link path with real
+> `session_token` verification in `validateAuth` (§7.10) — but that code is **not yet applied to the live Lambda** (schema `auth_tokens`/
+> `users.session_token` + `RESEND_API_KEY` env pending), so live behavior is still dev-mode preview + legacy `profile.id` fallback.
+> **Remaining blockers for production/clinical use:** the legacy fallback still accepts a client-minted `profile.id` as a bearer token
+> (§1.1/§1.2/§2.1), the privacy copy still overstates device-local processing (§2.6), passkey has no sign-in ceremony (§2.5),
+> and there is no rate limiting / server audit log / device registry (§2.4/§7).
 
 ---
 
@@ -193,5 +198,6 @@ Seed sessions/memories/messages/devices (with hardcoded 2026-08-xx timestamps) a
 | 7.7 | **LLM fallback short-circuit fixed** — on-device stub now throws → real backend-proxy/BYOK chain runs, stuck streaming resolved. | `src/shared/lib/llmClient.ts:162` |
 | 7.8 | **Seed-as-real on hydrate failure fixed** — `memoryStore`/`sessionStore` hydrate catch now empties arrays + sets `hydrateError`. | `memoryStore.ts:207-211`, `sessionStore.ts:141-144` |
 | 7.9 | **A11y + robots.txt** — contrast bumps, `aria-label` on file input + sessions select, `public/robots.txt`. | see WEB-QUALITY-AUDIT.md §7 |
+| 7.10 | **Phase C — server-backed magic link + real token verification** — `POST /api/v1/auth/magic-link` (Resend email, `auth_tokens` SHA-256 hash, 10-min TTL, single-use) + `POST /api/v1/auth/callback` (verify → upsert `users` dengan `session_token`); `validateAuth` kini async `SELECT id FROM users WHERE session_token=$1`; `getAuthHeaders` prefer `sessionToken`. **Deployment live belum diverifikasi** (butuh schema + env apply). | `lambda/handlers/auth.ts`, `lambda/middleware/auth.ts:41-42`, `src/features/auth/store/authStore.ts`, `schema/crdb-schema.sql` (`auth_tokens`, `users.session_token`) |
 
 Verification: `npm run typecheck` (frontend) and `npx tsc --noEmit` (in `lambda/`) both pass after the above.

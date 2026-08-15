@@ -84,7 +84,7 @@ export function ExportBuilder() {
         toast("Export uploaded", "Your bundle is in S3. Use the download link below.", "success");
         window.open(url, "_blank", "noopener,noreferrer");
       } else {
-        toast("Export upload failed", "Server export unavailable — local JSON still works.", "error");
+        toast("Export upload failed", "Server export unavailable — local JSON still works.", "danger");
       }
     } finally {
       setUploading(false);

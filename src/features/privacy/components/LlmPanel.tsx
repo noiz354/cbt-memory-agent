@@ -12,10 +12,16 @@
 
 import { PROVIDERS, type LLMProviderId } from "@/shared/lib/llmRegistry";
 import { saveApiKey, getApiKey, revokeApiKey, listConfiguredProviders } from "@/shared/lib/byokKeyManager";
+import {
+  getOnDeviceLoadProgress,
+  preloadOnDeviceEngine,
+  subscribeOnDeviceProgress,
+  isOnDeviceEngineReady,
+} from "@/shared/lib/onDeviceLLM";
 import { GlassPanel } from "@/shared/ui/GlassPanel";
 import { cn } from "@/shared/lib/cn";
 import { useState, useEffect, useCallback } from "react";
-import { Key, Check, Loader2, Trash2, Zap } from "lucide-react";
+import { Key, Check, Loader2, Trash2, Zap, Cpu } from "lucide-react";
 import { toast } from "@/shared/store/toastStore";
 
 interface ConfiguredState {
@@ -32,6 +38,8 @@ export function LlmPanel() {
   const [inputKey, setInputKey] = useState("");
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState<string | null>(null);
+  const [onDeviceProgress, setOnDeviceProgress] = useState(() => getOnDeviceLoadProgress());
+  const [preloading, setPreloading] = useState(false);
 
   const provider = PROVIDERS[selectedProvider];
   const models = provider.models;
@@ -39,6 +47,8 @@ export function LlmPanel() {
   useEffect(() => {
     void loadConfigured();
   }, []);
+
+  useEffect(() => subscribeOnDeviceProgress(setOnDeviceProgress), []);
 
   useEffect(() => {
     // Auto-select first model when provider changes
@@ -58,6 +68,22 @@ export function LlmPanel() {
       })),
     );
   }, []);
+
+  const handlePreload = async () => {
+    setPreloading(true);
+    try {
+      await preloadOnDeviceEngine();
+      toast("Model ready", "On-device model is ready to use offline.", "success");
+    } catch (err) {
+      toast(
+        "Preload failed",
+        err instanceof Error ? err.message : "WebLLM/WebGPU unavailable on this device.",
+        "danger",
+      );
+    } finally {
+      setPreloading(false);
+    }
+  };
 
   const handleSave = async () => {
     if (!inputKey.trim()) {
@@ -138,6 +164,46 @@ export function LlmPanel() {
           <span className="rounded-lg bg-ink/10 px-2 py-1 font-medium text-ink-muted">2. Backend proxy</span>
           <span className="text-ink-muted">→</span>
           <span className="rounded-lg bg-amber-500/10 px-2 py-1 font-medium text-amber-600">3. Your API key</span>
+        </div>
+
+        {/* On-device model status / preload */}
+        <div className="mt-4 rounded-xl border border-line bg-white/40 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Cpu className="size-4 text-teal" />
+              <p className="text-sm font-semibold">On-device model</p>
+            </div>
+            {!isOnDeviceEngineReady() && (
+              <button
+                type="button"
+                onClick={handlePreload}
+                disabled={preloading || onDeviceProgress > 0}
+                className={cn(
+                  "flex items-center gap-1 rounded-lg px-3 py-1 text-xs font-semibold text-white",
+                  preloading || onDeviceProgress > 0 ? "bg-line" : "bg-teal hover:bg-teal/80",
+                )}
+              >
+                {preloading ? <Loader2 className="size-3 animate-spin" /> : <Zap className="size-3" />}
+                {preloading ? "Downloading…" : "Preload"}
+              </button>
+            )}
+          </div>
+          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-ink/10">
+            <div
+              className={cn(
+                "h-full rounded-full bg-teal transition-all duration-200",
+                isOnDeviceEngineReady() && "bg-green-500",
+              )}
+              style={{ width: `${Math.round(onDeviceProgress * 100)}%` }}
+            />
+          </div>
+          <p className="mt-1 text-[11px] text-ink-muted">
+            {isOnDeviceEngineReady()
+              ? "Phi-3-mini ready — runs fully offline, no data leaves the device."
+              : onDeviceProgress > 0
+                ? `Downloading model… ${Math.round(onDeviceProgress * 100)}%`
+                : "Not loaded yet. Preload once to enable offline generation."}
+          </p>
         </div>
       </GlassPanel>
 

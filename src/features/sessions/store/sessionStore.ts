@@ -3,7 +3,7 @@ import { uid } from "@/shared/lib/format";
 import { createVersionedPersist } from "@/shared/lib/versionedPersist";
 import { apiClient } from "@/shared/lib/apiClient";
 import { getAuthHeaders } from "@/shared/lib/authSession";
-import type { SessionStatus } from "@/shared/types";
+import type { SessionStatus, MoodLabel } from "@/shared/types";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
@@ -124,12 +124,12 @@ export const useSessionStore = create<SessionState>()(
               title: s.title,
               status: s.status,
               mood: s.mood,
-              moodLabel: s.moodLabel,
+              moodLabel: s.moodLabel as MoodLabel,
               startedAt: s.startedAt,
               durationMin: s.durationMin,
               excerpt: s.excerpt,
-              thought: s.thought,
-              reframe: s.reframe,
+              thought: s.thought ?? "",
+              reframe: s.reframe ?? null,
             })),
             hydrated: true,
             hydrating: false,

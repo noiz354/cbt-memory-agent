@@ -6,11 +6,11 @@
 
 ## Phase 0 — Foundation (P0) — Safety + Correctness
 
-- [ ] **P0-1** AudioWorklet menggantikan ScriptProcessorNode
-  - [ ] Buat `audio-processor.js` (AudioWorkletProcessor)
-  - [ ] Ganti `audioClient.ts`: AudioWorklet → postMessage PCM
-  - [ ] Hapus `connect(destination)` — analisis only, no echo
-  - [ ] Fallback: AudioWorklet → ScriptProcessor → dummy level
+- [x] **P0-1** AudioWorklet menggantikan ScriptProcessorNode
+  - [x] Buat `audio-processor.ts` (AudioWorkletProcessor via blob source string)
+  - [x] Ganti `audioClient.ts`: AudioWorklet → postMessage PCM (`audioClient.ts:71-74`)
+  - [x] Hapus `connect(destination)` — analisis only, no echo (analysis-only, `audioClient.ts:95-96`)
+  - [x] Fallback: AudioWorklet → ScriptProcessor (`audioClient.ts:104-112`)
 
 - [x] **P0-2** VAD (Voice Activity Detection) sebelum transkripsi
   - [x] Integrasi Silero VAD ONNX model (lazy load)
@@ -39,38 +39,42 @@
 
 ## Phase 1 — On-Device Intelligence (P1)
 
-- [ ] **P1-1** MediaPipe Face Landmarker
-  - [ ] Load model dari IndexedDB (bukan fetch ulang)
-  - [ ] 478 landmark + 52 AU intensitas
-  - [ ] Interval adaptif: 5Hz aktif, 1Hz idle, 0Hz crisis
+- [x] **P1-1** MediaPipe Face Landmarker
+  - [x] Model `face_landmarker.task` (3.7MB) di `public/models/` (fetch dari origin, bukan IndexedDB)
+  - [x] 478 landmark + 52 blendshapes → ekspresi (neutral/engaged/tense/sad/distressed)
+  - [x] Interval adaptif: 5Hz aktif, 1Hz idle, 0Hz crisis (`faceClient.ts:6-10`, `INTERVALS_MS`; self-scheduling `setTimeout`, crisis poll 500ms untuk resume)
+  - [x] Wasm MediaPipe disalin ke `public/wasm/` dan `FilesetResolver.forVisionTasks('/wasm')` (fix build: API lama `{wasmPaths}` dihapus)
 
-- [ ] **P1-2** Whisper.cpp WASM transkripsi
-  - [ ] Lazy load model `base` (~140MB) saat first hold-to-talk
-  - [ ] EN + ID support
-  - [ ] Fallback: Web Speech API → dummy
+- [x] **P1-2** Whisper.cpp WASM transkripsi
+  - [x] Lazy load model saat first hold-to-talk (`@huggingface/transformers` + `onnx-community/whisper-tiny`)
+  - [x] EN + ID support — `detectLanguage()` dari `navigator.language` → dikirim sebagai hint ke worker (`transcribe.worker.ts`)
+  - [x] Fallback: Web Speech API real — `src/features/chat/lib/webSpeech.ts` (live recognition paralel; dipakai bila Whisper worker gagal, `via: "web-speech"`)
+  - [x] Fix bug jalur Whisper: `new Audio()` di worker selalu `ReferenceError` (Audio tidak ada di worker scope) → durasi kini diukur di main thread (`voiceNote.ts measureBlobDuration`)
 
-- [ ] **P1-3** Crisis fusion multimodal
-  - [ ] Weighted sum: text(0.5) + prosody(0.3) + face(0.2)
-  - [ ] Threshold > 0.7 → hard-halt + overlay
+- [x] **P1-3** Crisis fusion multimodal
+  - [x] Weighted sum: text(0.5) + prosody(0.3) + face(0.2) (`src/features/crisis/lib/crisisFusion.ts`)
+  - [x] Threshold > 0.7 → hard-halt + overlay (`CrisisFusionBridge` di `AppShell`, poll 500ms; desain konservatif — face/prosody saja tidak bisa trigger)
+  - [x] `distressHint` single-writer (bridge); CameraPip hanya publish `setFace`
 
-- [ ] **P1-4** Intisari generator rule-based
-  - [ ] Extract CBT constructs dari transcript buffer 5 menit
-  - [ ] Output JSON: `{themes, hotCognition, moodDelta, cbtPhase}`
+- [x] **P1-4** Intisari generator rule-based
+  - [x] `generateIntisari(messages)` di `src/features/chat/lib/intisari.ts` — topic, mood cue, reframe template
+  - [x] Dipakai di `ChatSafetyHeader.finalize()` (ganti metadata hardcoded `{mood:5,moodLabel:'grounded',reframe:null}`)
+  - [ ] Output JSON `{themes, hotCognition, moodDelta, cbtPhase}` — **belum** (output saat ini: `{excerpt, mood, moodLabel, reframe}`)
 
 ---
 
 ## Phase 2 — Cloud Integration (P2)
 
-- [ ] **P2-1** Cloud LLM API endpoint
-  - [ ] POST /summarize dengan intisari terstruktur
-  - [ ] Max 500 token, tanpa PII, tanpa media
+- [x] **P2-1** Cloud LLM API endpoint
+  - [x] POST /summarize dengan intisari terstruktur — diimplementasikan sebagai `POST /chat/turn` (SSE ke OpenRouter, `lambda/handlers/chatTurn.ts`)
+  - [x] Max 500 token, tanpa PII, tanpa media — prompt CBT + streaming tokens
 
 - [ ] **P2-2** Idempotency + cache 24h
-  - [ ] `Idempotency-Key: {sessionId}`
+  - [ ] `Idempotency-Key: {sessionId}` — **belum ada** (hanya di CORS allow_headers infra, tidak dibaca handler)
   - [ ] Fallback on-device jika cloud down/timeout 5s
 
 - [ ] **P2-3** Audit log untuk saran cloud
-  - [ ] Log setiap saran yang diterima/ditolak
+  - [ ] Log setiap saran yang diterima/ditolak — **belum ada** (tabel `audit_events` ada tapi zero INSERT)
 
 ---
 
@@ -110,9 +114,9 @@
 - [x] Fix `--external:pg` → pg dibundle dalam zip (217KB) — perbaiki `Cannot find module 'pg'`
 - [x] Function URL (us-east-1): `https://armepcglafkj763liezd75etlm0sqals.lambda-url.us-east-1.on.aws/`
 - [x] `aws lambda invoke` → **200** `{"status":"ok","crdb":"connected","llm":"available","s3":"available","version":"0.1.0"}`
-- [ ] **TODO:** Akses publik URL masih 403 (`AccessDeniedException`) walau policy `FunctionURLAllowPublicAccess` benar — request diblokir di service layer (bukan handler); perlu investigasi lanjut
-- [ ] **TODO:** Setup GitHub remote + secrets untuk `.github/workflows/deploy.yml` (butuh static AWS keys, CRDB creds, dll)
-- [ ] **TODO:** Deploy frontend (docker image + nginx proxy `/api/v1` → backend)
+- [x] **403 Fixed:** Akses publik Function URL 403 (`AccessDeniedException`) — root cause: sejak Okt 2025 AWS butuh **dua** permission di resource-based policy (`lambda:InvokeFunctionUrl` + `lambda:InvokeFunction`) walau AuthType=NONE. Commit `8145e93` menambah statement kedua (`infra/modules/lambda/main.tf:94-104`); recheck pada ap-southeast-3 → **HTTP 200**. 403 murni dari AWS layer (handler tidak pernah return 403). Sisa: `docs/MANUAL-TESTING.md` masih menunjuk URL us-east-1 lama
+- [ ] **TODO:** Setup GitHub remote + secrets untuk `.github/workflows/deploy.yml` (butuh static AWS keys, CRDB creds, dll) — `git remote -v` masih kosong; deploy.yml butuh 9 secrets + tambah `TF_VAR_resend_api_key` (variabel required)
+- [ ] **TODO:** Deploy frontend (docker image + nginx proxy `/api/v1` → backend) — infra masih Lambda-only, belum ada compute frontend
 
 ## Migrasi Bedrock → OpenRouter (2026-08-14)
 
@@ -167,7 +171,8 @@ Fix dari AUDIT/WEB-QUALITY/SECURITY diimplementasikan; `npm run typecheck` (fron
 - [x] **Backend** — `purge.ts` real (confirmation-gated per-user `DELETE` semua tabel via `crdb.executeCount`); `export.ts` → 501; `auth.ts` tolak token malformed (len<8/whitespace); CORS fail-loud warn saat `ALLOWED_ORIGIN` kosong
 - [x] **Empty state hydrate gagal** — `memoryStore`/`sessionStore` set `[]` + `hydrateError` (bukan seed sebagai data asli)
 - [x] **Dokumen audit diperbarui** menandai status fix (AUDIT.md, WEB-QUALITY-AUDIT.md, SECURITY-AUDIT.md §7 remediation log)
-- [ ] **Masih terbuka** (untuk lanjutan): real authN/authZ server-side (verifikasi token vs CRDB users), passkey `credentials.get()`, rewrite copy privasi, `GET /turns` read endpoint, set `ALLOWED_ORIGIN` + rate limit + CSP, route-level code splitting, re-run Lighthouse pada prod build, integrasi WebLLM on-device, wiring `startAudioWorker` (Hold-to-talk)
+- [x] **DONE sejak 2026-08-15 (Phase A/B/C):** real authN/authZ server-side **sebagian** (session_token verification via `validateAuth` async + `SELECT id FROM users WHERE session_token=$1`, `middleware/auth.ts:41-42`; legacy `profile.id` masih fallback), `GET /turns` read endpoint (2.5), integrasi WebLLM on-device (1.1), wiring `startAudioWorker` → Hold-to-talk (1.2), passkey `credentials.create` real (create saja, `get` belum)
+- [ ] **Masih terbuka** (untuk lanjutan): passkey `credentials.get()` assertion ceremony, rewrite copy privasi, `ALLOWED_ORIGIN` ter-set (masih `*`), rate limit + server audit log, CSP handler, route-level code splitting, re-run Lighthouse pada prod build, hapus resource us-east-1 orphan
 
 ## Phase A + B (2026-08-15) — implementasi WORK-LIST
 
@@ -179,6 +184,11 @@ Semua item Phase A (on-device) + Phase B (no-UI features) dari `docs/15-8-26/WOR
 - [x] **1.7 Waveform playback + truncated** — `WaveformScrubber` pakai `HTMLAudioElement` real (play/pause, scrub seek); `triggerBargeIn` kini set `truncated: true` → tombol "Auto-resume" jadi reachable
 - [x] **1.2+1.3 Voice notes** — `@huggingface/transformers` + worker Whisper (`transcribe.worker.ts`, `onnx-community/whisper-tiny`); `voiceNote.ts` merekam mic (MediaRecorder) + wiring `startAudioWorker` (VAD+level); `HoldToTalkOrb` kirim transkrip + blob audio (waveform playable)
 - [x] **1.1 WebLLM** — `@mlc-ai/web-llm` + `src/shared/lib/onDeviceLLM.ts` (MLCEngine lazy, Phi-3-mini-4k Q4, streaming via `chat.completions`); `callOnDeviceLLM` kini benar-benar inferensi on-device; gagal → throw (fallback chain tetap jalan)
+- [x] **P1-1 Interval adaptif face** — `faceClient.ts` self-scheduling `setTimeout` (`INTERVALS_MS={active:200,idle:1000,crisis:0}`, `CRISIS_POLL_MS=500`); mode dari `recording/isStreaming/crisisActive` (`getMode` di `CameraPip`); fix guard `video.readyState<2` re-schedule; wasm MediaPipe → `public/wasm/` + `FilesetResolver.forVisionTasks('/wasm')` (build fix)
+- [x] **P1-2 Whisper EN+ID + Web Speech fallback** — `detectLanguage()` → hint `language` ke `transcribe.worker.ts`; fallback real via `webSpeech.ts` (live recognition, `via:"web-speech"` + toast); fix bug `new Audio()` di worker (ReferenceError) → durasi diukur di main thread (`measureBlobDuration`)
+- [x] **P1-3 Crisis fusion multimodal** — `src/features/crisis/lib/crisisFusion.ts` `computeCrisisScore` (text 0.5 + prosody 0.3 + face 0.2, threshold >0.7); `CrisisFusionBridge` (AppShell, poll 500ms) → `triggerCrisis`; `distressHint` single-writer (bridge), `chatStore.prosody` dari audio worker
+- [x] **P1-4 Intisari rule-based** — `src/features/chat/lib/intisari.ts` `generateIntisari` (topic/mood/reframe); dipakai `ChatSafetyHeader.finalize()` ganti metadata hardcoded
+- [x] **WebLLM progress UI** — `LlmPanel.tsx`: progress bar + tombol Preload (`subscribeOnDeviceProgress`, `preloadOnDeviceEngine`, `isOnDeviceEngineReady`; `setInitProgressCallback`)
 - [x] **2.1 Semantic memory search UI** — `MemoryPage` debounce 400ms → `apiClient.searchMemory` (GET `/memory/semantic`), hasil chip clickable; fallback substring lokal
 - [x] **2.2 Add-memory-node UI** — `memoryStore.addNode` (+ `syncNode` ke backend); tombol "Add memory" di `GraphToolbar`; `AddMemoryModal` dialog baru
 - [x] **2.6 Kanban status persist** — `sessionStore.setStatus` kini `apiClient.saveSession` (upsert) → status bertahan di CockroachDB
@@ -186,7 +196,7 @@ Semua item Phase A (on-device) + Phase B (no-UI features) dari `docs/15-8-26/WOR
 - [x] **2.5 Session detail transcript** — `GET /session/:id/turns` baru (`handlers/turns.ts`) baca `chat_turns`; `SessionDetailPage` render transkrip; tombol continue → `/chat?session=…`
 - [x] **2.3 Metrics page + /metrics real** — `handleMetrics` query real (sessions/memory/chat_turns/audit_events per-user); halaman `/metrics` baru + nav "Metrics"
 - [x] **2.4 S3 export real** — `handleExport` kumpulkan bundle (sessions/memories/edges/turns/audit) → `s3.uploadExport` (presigned URL); `ExportBuilder` tombol "Upload to S3" wire `uploadExportBundle` (sebelumnya dead code)
-- [ ] **Masih terbuka** (Phase C/D): real authN/authZ, passkey `credentials.get()`, rewrite copy privasi, rate limit + server audit, `ALLOWED_ORIGIN` ter-set, CSP + code splitting, re-run Lighthouse prod build
+- [ ] **Masih terbuka** (Phase C/D): **deploy Phase C ke Lambda live** (SSM `RESEND_API_KEY` + apply schema `auth_tokens`/`session_token`), passkey `credentials.get()`, rewrite copy privasi, rate limit + server audit log (`audit_events` INSERT), `ALLOWED_ORIGIN` ter-set (masih `*`), CSP + code splitting, re-run Lighthouse prod build, device registry (`seedDevices` → real `/devices`)
 
 ## Phase C: Resend magic-link (2026-08-15)
 
@@ -198,4 +208,5 @@ Magic-link email via Resend — server-backed auth, resolves WORK-LIST 3.2 (real
 - **Frontend**: `apiClient.requestMagicLink/consumeMagicLink` (public); `authStore.issueMagicLink/consumeMagicLink` async (server-first, fallback local dev); `getAuthHeaders` pakai `profile.sessionToken ?? profile.id`; `SessionProfile.sessionToken?`; `MagicLinkForm` state loading/sent/dev-preview; `AuthCallbackPage` server verify
 - **Config**: `RESEND_API_KEY` + `EMAIL_FROM=onboarding@resend.dev` di `.env` (git-ignored) + placeholder di `.env.example`. **Tidak pernah di-commit**
 - **Cost** (verified): ≤100 email/bulan ≈ $0 (Resend free tier 3k/mo, Lambda free tier). 1 email = 1 invokasi Lambda (~$0) + 1 email Resend
-- **⚠ Deployment belum dilakukan**: Lambda live belum punya `RESEND_API_KEY` + schema baru — butuh `aws login --profile aws-x-cdb`, apply schema, redeploy. Sampai saat itu perilaku live = dev-mode preview
+- **Terraform wiring done** (commit `fe98ab3`): env `RESEND_API_KEY` via SSM `/hackathon/resend/api-key`, `EMAIL_FROM`, `APP_URL` masuk ke Lambda env; `infra/terraform.tfvars` siap
+- **⚠ Deployment live belum diverifikasi**: perlu `aws login --profile aws-x-cdb`, apply schema ke CRDB, `terraform apply`, lalu test magic-link. Sampai saat itu perilaku live = dev-mode preview (`{ok:true, sent:false, devUrl}`). Juga `deploy.yml` belum kirim `TF_VAR_resend_api_key` (variabel `resend_api_key` sekarang required tanpa default → CI `terraform apply` akan gagal sampai secret ditambah)

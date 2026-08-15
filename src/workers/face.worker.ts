@@ -9,8 +9,6 @@
  */
 
 import { FaceLandmarker, FilesetResolver } from "@mediapipe/tasks-vision";
-import visionWasmSimd from "@mediapipe/tasks-vision/wasm/vision_wasm_nosimd_internal.wasm?url";
-import visionWasm from "@mediapipe/tasks-vision/wasm/vision_wasm_internal.wasm?url";
 
 export interface FaceWorkerIn {
   type: "frame";
@@ -41,12 +39,11 @@ let initPromise: Promise<void> | null = null;
 
 async function initModel(): Promise<void> {
   try {
-    const vision = await FilesetResolver.forVisionTasks({
-      wasmPaths: {
-        "vision_wasm_internal.wasm": visionWasm,
-        "vision_wasm_nosimd_internal.wasm": visionWasmSimd,
-      },
-    });
+    // Wasm files are served statically from /wasm (see public/wasm/) so the
+    // loader and binary resolve inside the worker at runtime.
+    const vision = await FilesetResolver.forVisionTasks(
+      `${self.location.origin}/wasm`,
+    );
     landmarker = await FaceLandmarker.createFromOptions(vision, {
       baseOptions: {
         modelAssetPath: `${self.location.origin}/models/face_landmarker.task`,
