@@ -1,0 +1,28 @@
+name: Vector Health Check
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  vector-health:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: lambda/package-lock.json
+
+      - name: Install deps (lambda)
+        working-directory: lambda
+        run: npm ci
+
+      - name: Run vector health check
+        run: npx tsx scripts/vector-health-check.ts --min-coverage 95 --json
+        env:
+          CRDB_CONNECTION_URL: ${{ secrets.CRDB_CONNECTION_URL }}

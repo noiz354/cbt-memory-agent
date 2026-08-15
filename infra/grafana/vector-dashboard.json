@@ -1,0 +1,178 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "description": "FASE Vector Indexing — coverage embedding, distribusi chunking, node tanpa embedding, total embedding per user & rencana eksekusi vector search. Datasource: CockroachDB (uid crdb-postgres). Query di schema/vector-queries.sql.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "links": [],
+  "panels": [
+    {
+      "datasource": { "type": "postgres", "uid": "crdb-postgres" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "yellow", "value": 80 }, { "color": "green", "value": 95 }] },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": true },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "crdb-postgres" },
+          "format": "table",
+          "group": [],
+          "rawSql": "SELECT\n  mn.user_id,\n  COUNT(*)::int AS total_nodes,\n  COUNT(DISTINCT e.node_id)::int AS nodes_with_embedding,\n  ROUND(COUNT(DISTINCT e.node_id)::numeric / NULLIF(COUNT(*), 0) * 100, 1) AS coverage_pct\nFROM memory_nodes mn\nLEFT JOIN embeddings e ON e.node_id = mn.id AND e.user_id = mn.user_id\nGROUP BY mn.user_id\nORDER BY total_nodes DESC;",
+          "refId": "A"
+        }
+      ],
+      "title": "Embedding Coverage per User (%)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "crdb-postgres" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "fillOpacity": 40, "lineWidth": 1, "stacking": { "mode": "none", "group": "A" } },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "id": 2,
+      "options": {
+        "displayMode": "gradient",
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": false },
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": true },
+        "showUnfilled": true,
+        "text": { "valueSize": 16 },
+        "tooltip": { "mode": "single", "sort": "none" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "crdb-postgres" },
+          "format": "table",
+          "group": [],
+          "rawSql": "SELECT text_source, COUNT(*)::int AS row_count\nFROM embeddings\nGROUP BY text_source\nORDER BY row_count DESC;",
+          "refId": "A"
+        }
+      ],
+      "title": "Embedding text_source Distribution (chunking)",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "crdb-postgres" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "custom": { "align": "auto", "cellOptions": { "type": "auto" }, "inspect": false },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 8 },
+      "id": 3,
+      "options": { "showHeader": true },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "crdb-postgres" },
+          "format": "table",
+          "group": [],
+          "rawSql": "SELECT mn.id, mn.title, mn.user_id, mn.last_touched\nFROM memory_nodes mn\nLEFT JOIN embeddings e ON e.node_id = mn.id AND e.user_id = mn.user_id\nWHERE e.id IS NULL\nORDER BY mn.last_touched DESC\nLIMIT 50;",
+          "refId": "A"
+        }
+      ],
+      "title": "Nodes WITHOUT Embedding (backfill candidates)",
+      "type": "table"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "crdb-postgres" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "fillOpacity": 40, "lineWidth": 1, "stacking": { "mode": "none", "group": "A" } },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 8 },
+      "id": 4,
+      "options": {
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "crdb-postgres" },
+          "format": "table",
+          "group": [],
+          "rawSql": "SELECT user_id, COUNT(*)::int AS embedding_rows, COUNT(DISTINCT node_id)::int AS nodes\nFROM embeddings\nGROUP BY user_id\nORDER BY embedding_rows DESC;",
+          "refId": "A"
+        }
+      ],
+      "title": "Total Embeddings per User (multi-chunk → >1 row)",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "crdb-postgres" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 17 },
+      "id": 5,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": true },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "crdb-postgres" },
+          "format": "table",
+          "group": [],
+          "rawSql": "-- Jalankan EXPLAIN ANALYZE query vector chat (lihat schema/vector-queries.sql #5)\n-- untuk memastikan operator `vector search`, bukan full scan.\nSELECT 'vector search' AS status, 1::int AS check_placeholder\nWHERE EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='public' AND tablename='embeddings' AND indexname='embeddings_vector_idx');",
+          "refId": "A"
+        }
+      ],
+      "title": "Vector Search — EXPLAIN (manual check)",
+      "type": "stat"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 40,
+  "tags": ["vector", "fase-vector"],
+  "templating": { "list": [] },
+  "time": { "from": "now-30d", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Vector Indexing — Embedding Coverage · Chunking · Backfill",
+  "uid": "vector-indexing",
+  "version": 1
+}
