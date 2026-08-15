@@ -44,6 +44,11 @@ import { handleTelemetryRelay } from "./handlers/telemetry";
 import { handleRequestMagicLink, handleConsumeMagicLink } from "./handlers/auth";
 import { handleTrackEvents } from "./handlers/events";
 import { handleMonetizationCac, handleMonetizationSummary } from "./handlers/monetization";
+import {
+  handleAnalyticsFunnel,
+  handleAnalyticsActivity,
+  handleAnalyticsRetention,
+} from "./handlers/analytics";
 
 const crdb = new CrdbClient(process.env.CRDB_CONNECTION!);
 const llm = new OpenRouterClient();
@@ -229,6 +234,17 @@ async function route(
   }
   if (method === "GET" && path === "/api/v1/monetization/summary") {
     return await handleMonetizationSummary(queryStringParameters, crdb);
+  }
+
+  // Analytics (FASE 2+3 — funnel, activity, retention)
+  if (method === "GET" && path === "/api/v1/analytics/funnel") {
+    return await handleAnalyticsFunnel(queryStringParameters, crdb);
+  }
+  if (method === "GET" && path === "/api/v1/analytics/activity") {
+    return await handleAnalyticsActivity(queryStringParameters, crdb);
+  }
+  if (method === "GET" && path === "/api/v1/analytics/retention") {
+    return await handleAnalyticsRetention(queryStringParameters, crdb);
   }
 
   // Health

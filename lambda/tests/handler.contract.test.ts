@@ -141,6 +141,9 @@ describe("HTTP trace contract (static)", () => {
       "/api/v1/events",
       "/api/v1/monetization/cac",
       "/api/v1/monetization/summary",
+      "/api/v1/analytics/funnel",
+      "/api/v1/analytics/activity",
+      "/api/v1/analytics/retention",
     ]) {
       expect(HANDLER_SRC).toContain(`path === "${route}"`);
     }
