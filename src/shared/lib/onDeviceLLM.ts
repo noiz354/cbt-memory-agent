@@ -6,6 +6,7 @@
  */
 
 import * as webllm from "@mlc-ai/web-llm";
+import { withSpan } from "./telemetry";
 
 const MODEL_ID = "Phi-3-mini-4k-instruct-q4f16_1-MLC";
 
@@ -65,31 +66,44 @@ export async function generateOnDevice(
   onDelta?: (delta: string) => void,
 ): Promise<{ content: string; tokensUsed: number }> {
   const e = await initEngine();
-  const completion = await e.chat.completions.create({
-    messages: messages as webllm.ChatCompletionMessageParam[],
-    stream: Boolean(onDelta),
-    temperature: 0.7,
-    max_tokens: 2048,
-  });
+  return withSpan(
+    "agent.ondevice",
+    async (span) => {
+      span.setAttribute("gen_ai.provider", "webllm");
+      span.setAttribute("gen_ai.request.model", MODEL_ID);
+      span.setAttribute("gen_ai.request.temperature", 0.7);
 
-  let fullContent = "";
-  if (onDelta && Symbol.asyncIterator in completion) {
-    const stream = completion as unknown as AsyncIterable<{
-      choices: { delta?: { content?: string } }[];
-    }>;
-    for await (const chunk of stream) {
-      const delta = chunk.choices?.[0]?.delta?.content ?? "";
-      if (delta) {
-        fullContent += delta;
-        onDelta(delta);
+      const completion = await e.chat.completions.create({
+        messages: messages as webllm.ChatCompletionMessageParam[],
+        stream: Boolean(onDelta),
+        temperature: 0.7,
+        max_tokens: 2048,
+      });
+
+      let fullContent = "";
+      if (onDelta && Symbol.asyncIterator in completion) {
+        const stream = completion as unknown as AsyncIterable<{
+          choices: { delta?: { content?: string } }[];
+        }>;
+        for await (const chunk of stream) {
+          const delta = chunk.choices?.[0]?.delta?.content ?? "";
+          if (delta) {
+            fullContent += delta;
+            onDelta(delta);
+          }
+        }
+      } else {
+        const usage = (completion as unknown as { usage?: { completion_tokens?: number } }).usage;
+        fullContent = (completion as unknown as { choices?: { message?: { content?: string } }[] })
+          .choices?.[0]?.message?.content ?? "";
+        span.setAttribute("gen_ai.usage.output_tokens", usage?.completion_tokens ?? 0);
+        span.setAttribute("gen_ai.response.model", MODEL_ID);
+        return { content: fullContent, tokensUsed: usage?.completion_tokens ?? 0 };
       }
-    }
-  } else {
-    const usage = (completion as unknown as { usage?: { completion_tokens?: number } }).usage;
-    fullContent = (completion as unknown as { choices?: { message?: { content?: string } }[] })
-      .choices?.[0]?.message?.content ?? "";
-    return { content: fullContent, tokensUsed: usage?.completion_tokens ?? 0 };
-  }
 
-  return { content: fullContent, tokensUsed: 0 };
+      span.setAttribute("gen_ai.response.model", MODEL_ID);
+      return { content: fullContent, tokensUsed: 0 };
+    },
+    { attributes: { "gen_ai.usage.input_tokens": messages.length } },
+  );
 }

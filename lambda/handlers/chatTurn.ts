@@ -11,8 +11,10 @@
 
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
 import { z } from "zod";
+import { Context } from "@opentelemetry/api";
 import { CrdbClient } from "../lib/crdb";
 import { OpenRouterClient } from "../lib/openrouter";
+import { withSpan } from "../lib/telemetry";
 
 const chatTurnSchema = z.object({
   v: z.literal(1),
@@ -45,6 +47,7 @@ export async function handleChatTurn(
   llm: OpenRouterClient,
   token: string,
   deviceId: string,
+  rootCtx: Context,
 ): Promise<APIGatewayProxyResult> {
   const cors = {
     "Access-Control-Allow-Origin": process.env.ALLOWED_ORIGIN ?? "*",
@@ -73,7 +76,19 @@ export async function handleChatTurn(
     const userId = await upsertUser(crdb, token);
 
     // 3. Memory context
-    const memories = await getMemoryContext(crdb, userId, body.memoryIds ?? []);
+    const memories = await withSpan(
+      "agent.memory.retrieve",
+      rootCtx,
+      async (span) => {
+        const rows = await getMemoryContext(crdb, userId, body.memoryIds ?? []);
+        span.setAttribute("db.system", "cockroachdb");
+        span.setAttribute("db.operation", "SELECT");
+        span.setAttribute("db.memory_ids", body.memoryIds?.length ?? 0);
+        span.setAttribute("db.results", rows.length);
+        return rows;
+      },
+      { attributes: { "db.system": "cockroachdb", "db.operation": "SELECT" } },
+    );
 
     // 4. Build prompt
     const contextBlock =
@@ -97,24 +112,43 @@ export async function handleChatTurn(
     let fullContent = "";
     let tokensUsed = 0;
 
-    const stream = llm.streamChat(messages);
-    while (true) {
-      const { done, value } = await stream.next();
-      if (done) {
-        tokensUsed = (value as { tokensUsed: number } | undefined)?.tokensUsed ?? 0;
-        break;
-      }
-      fullContent += value;
-    }
+    const llmResult = await withSpan(
+      "llm.openrouter",
+      rootCtx,
+      async (span) => {
+        span.setAttribute("gen_ai.provider", "openrouter");
+        span.setAttribute("gen_ai.request.model", "openrouter/free");
+        span.setAttribute("gen_ai.request.max_tokens", 1024);
+
+        const stream = llm.streamChat(messages);
+        let content = "";
+        let tokens = 0;
+        while (true) {
+          const { done, value } = await stream.next();
+          if (done) {
+            tokens = (value as { tokensUsed: number } | undefined)?.tokensUsed ?? 0;
+            break;
+          }
+          content += value;
+        }
+        span.setAttribute("gen_ai.usage.output_tokens", tokens);
+        return { content, tokens };
+      },
+      { attributes: { "gen_ai.provider": "openrouter", "gen_ai.request.model": "openrouter/free" } },
+    );
+    fullContent = llmResult.content;
+    tokensUsed = llmResult.tokens;
 
     if (!fullContent.trim()) {
       fullContent = "Maaf, saya tidak bisa memproses pesan itu saat ini. Coba lagi ya.";
     }
 
     // 6. Save chat_turns
-    await upsertSession(crdb, userId, body.sessionId);
-    await saveChatTurn(crdb, userId, body.sessionId, "user", body.userMessage, 0, body.memoryIds ?? []);
-    await saveChatTurn(crdb, userId, body.sessionId, "assistant", fullContent, tokensUsed, []);
+    await withSpan("db.persist", rootCtx, async () => {
+      await upsertSession(crdb, userId, body.sessionId);
+      await saveChatTurn(crdb, userId, body.sessionId, "user", body.userMessage, 0, body.memoryIds ?? []);
+      await saveChatTurn(crdb, userId, body.sessionId, "assistant", fullContent, tokensUsed, []);
+    }, { attributes: { "db.system": "cockroachdb", "db.operation": "INSERT" } });
 
     const sse =
       fullContent

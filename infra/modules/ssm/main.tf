@@ -77,6 +77,28 @@ resource "aws_ssm_parameter" "resend_api_key" {
   }
 }
 
+resource "aws_ssm_parameter" "grafana_otlp_endpoint" {
+  name        = "/${var.environment}/grafana/otlp-endpoint"
+  description = "Grafana Cloud OTLP gateway endpoint"
+  type        = "String"
+  value       = var.grafana_otlp_endpoint
+
+  tags = {
+    Name = "Grafana OTLP Endpoint"
+  }
+}
+
+resource "aws_ssm_parameter" "grafana_otlp_headers" {
+  name        = "/${var.environment}/grafana/otlp-headers"
+  description = "Grafana Cloud OTLP auth headers (Authorization=Basic ...)"
+  type        = "SecureString"
+  value       = var.grafana_otlp_headers
+
+  tags = {
+    Name = "Grafana OTLP Headers"
+  }
+}
+
 # Generate random pepper if not provided
 resource "random_password" "pepper" {
   length  = 32

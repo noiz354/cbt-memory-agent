@@ -27,7 +27,7 @@ variable "memory_size" {
 variable "timeout" {
   description = "Lambda timeout in seconds"
   type        = number
-  default     = 29  # Not 30!
+  default     = 29 # Not 30!
 }
 
 variable "crdb_cluster_id" {
@@ -71,6 +71,19 @@ variable "resend_api_key" {
   description = "Resend API key (re_...) for magic-link emails"
   type        = string
   sensitive   = true
+}
+
+variable "grafana_otlp_endpoint" {
+  description = "Grafana Cloud OTLP gateway endpoint (https://otlp-gateway-...grafana.net/otlp)"
+  type        = string
+  default     = ""
+}
+
+variable "grafana_otlp_headers" {
+  description = "Grafana Cloud OTLP auth headers (Authorization=Basic <base64(instance_id:token)>)"
+  type        = string
+  sensitive   = true
+  default     = ""
 }
 
 variable "email_from" {

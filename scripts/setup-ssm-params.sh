@@ -145,6 +145,16 @@ upload_param "app/pepper" \
   "${APP_PEPPER:-$(openssl rand -hex 32)}" \
   "HMAC pepper for user ID generation"
 
+# Grafana Cloud OTLP (OpenTelemetry — traces/logs/metrics)
+upload_param "grafana/otlp-endpoint" \
+  "${OTEL_EXPORTER_OTLP_ENDPOINT:-}" \
+  "Grafana Cloud OTLP gateway endpoint" \
+  "String"  # Not sensitive
+
+upload_param "grafana/otlp-headers" \
+  "${OTEL_EXPORTER_OTLP_HEADERS:-}" \
+  "Grafana Cloud OTLP auth headers (Authorization=Basic ...)"
+
 echo ""
 
 # ─── Verify Upload ───────────────────────────────────────────────────────────

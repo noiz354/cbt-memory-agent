@@ -210,3 +210,14 @@ Magic-link email via Resend — server-backed auth, resolves WORK-LIST 3.2 (real
 - **Cost** (verified): ≤100 email/bulan ≈ $0 (Resend free tier 3k/mo, Lambda free tier). 1 email = 1 invokasi Lambda (~$0) + 1 email Resend
 - **Terraform wiring done** (commit `fe98ab3`): env `RESEND_API_KEY` via SSM `/hackathon/resend/api-key`, `EMAIL_FROM`, `APP_URL` masuk ke Lambda env; `infra/terraform.tfvars` siap
 - **⚠ Deployment live belum diverifikasi**: perlu `aws login --profile aws-x-cdb`, apply schema ke CRDB, `terraform apply`, lalu test magic-link. Sampai saat itu perilaku live = dev-mode preview (`{ok:true, sent:false, devUrl}`). Juga `deploy.yml` belum kirim `TF_VAR_resend_api_key` (variabel `resend_api_key` sekarang required tanpa default → CI `terraform apply` akan gagal sampai secret ditambah)
+
+## Observability: Full-Stack OpenTelemetry → Grafana Cloud (2026-08-15)
+
+Instrumentasi OTel penuh 3 lapisan (traces+logs+metrics) ke Grafana Cloud OTLP gateway (stack 1494299, Tempo). Rencana & hasil di `docs/15-8-26-adding-observability/`. **✅ DEPLOYED + VERIFIED live.**
+
+- [x] **Frontend** — `src/shared/lib/telemetry.ts` (WebTracerProvider + FetchInstrumentation + W3C propagator + OTLP exporter → relay `POST /api/v1/telemetry`); mount di `main.tsx`; span `agent.ondevice` di `onDeviceLLM.ts` (gen_ai provider=webllm). Sampling 10% default (`VITE_OTEL_SAMPLING_RATIO`). Token Grafana TIDAK di bundle — relay server-side.
+- [x] **Backend** — `lambda/lib/telemetry.ts` (TracerProvider+metrics+logs, extract W3C traceparent, `flushTelemetry` sebelum return); `lambda/handlers/telemetry.ts` (relay passthrough + parse `OTEL_EXPORTER_OTLP_HEADERS`); `handler.ts` root span + `X-Trace-Id` header; spans `agent.memory.retrieve`/`llm.openrouter`/`db.persist` di `chatTurn.ts`.
+- [x] **Infra** — SSM `/hackathon/grafana/otlp-endpoint` + `/hackathon/grafana/otlp-headers`; Lambda env `OTEL_SERVICE_NAME`/`OTEL_EXPORTER_OTLP_ENDPOINT`/`OTEL_EXPORTER_OTLP_HEADERS`; `terraform apply` sukses (2 add, 1 change).
+- [x] **Verifikasi E2E** — `npx tsx scripts/verify_telemetry.ts` → **PASS semua**: X-Trace-Id roundtrip (traceparent browser→backend), SSE chat valid, spans `agent.memory.retrieve`+`llm.openrouter`+`db.persist` ter-record di Tempo. Tempo query: `https://tempo-prod-23-prod-ap-southeast-2.grafana.net/tempo` (user 1446402 + read-only token).
+- [x] **Fix kunci** — (1) `startSpan` harus pass `parentCtx` ke arg ke-3 `tracer.startSpan` (OpenTelemetry JS v2.x API) — tanpa ini trace selalu root baru; (2) `OTEL_EXPORTER_OTLP_HEADERS` di-recompute dari `GRAFANA_OTLP_TOKEN` saat ini (versi lama encode token usang); (3) relay parse `Authorization=Basic …` (nilai mengandung `=`) via `parseKeyValueHeaders`.
+- [ ] **Masih terbuka** — Tempo/Loki/Mimir dashboard di Grafana UI; alert OTLP export failure; metrics dashboard util; re-verify frontend trace di browser (perlu `VITE_OTEL_ENABLED=true` di build frontend + dev proxy `/api/v1`).

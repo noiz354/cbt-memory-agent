@@ -48,3 +48,14 @@ variable "resend_api_key" {
   type        = string
   sensitive   = true
 }
+
+variable "grafana_otlp_endpoint" {
+  description = "Grafana Cloud OTLP gateway endpoint (https://otlp-gateway-...grafana.net/otlp)"
+  type        = string
+}
+
+variable "grafana_otlp_headers" {
+  description = "Grafana Cloud OTLP auth headers (Authorization=Basic <base64(instance_id:token)>)"
+  type        = string
+  sensitive   = true
+}

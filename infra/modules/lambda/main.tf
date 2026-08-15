@@ -17,6 +17,14 @@ data "aws_ssm_parameter" "resend_api_key" {
   name = "/${var.environment}/resend/api-key"
 }
 
+data "aws_ssm_parameter" "grafana_otlp_endpoint" {
+  name = "/${var.environment}/grafana/otlp-endpoint"
+}
+
+data "aws_ssm_parameter" "grafana_otlp_headers" {
+  name = "/${var.environment}/grafana/otlp-headers"
+}
+
 resource "aws_lambda_function" "this" {
   function_name = var.function_name
   description   = "CBT Memory Agent API — CockroachDB x AWS Hackathon 2026"
@@ -35,15 +43,18 @@ resource "aws_lambda_function" "this" {
 
   environment {
     variables = {
-      NODE_ENV          = "production"
-      CRDB_CONNECTION   = data.aws_ssm_parameter.crdb_url.value
-      CCLOUD_API_KEY    = data.aws_ssm_parameter.ccloud_api_key.value
-      OPENROUTER_API_KEY = data.aws_ssm_parameter.openrouter_api_key.value
-      RESEND_API_KEY    = data.aws_ssm_parameter.resend_api_key.value
-      EMAIL_FROM        = var.email_from
-      APP_URL           = var.app_url
-      S3_BUCKET         = var.s3_bucket
-      ALLOWED_ORIGIN    = var.allowed_origin
+      NODE_ENV                    = "production"
+      CRDB_CONNECTION             = data.aws_ssm_parameter.crdb_url.value
+      CCLOUD_API_KEY              = data.aws_ssm_parameter.ccloud_api_key.value
+      OPENROUTER_API_KEY          = data.aws_ssm_parameter.openrouter_api_key.value
+      RESEND_API_KEY              = data.aws_ssm_parameter.resend_api_key.value
+      EMAIL_FROM                  = var.email_from
+      APP_URL                     = var.app_url
+      S3_BUCKET                   = var.s3_bucket
+      ALLOWED_ORIGIN              = var.allowed_origin
+      OTEL_SERVICE_NAME           = "cbt-memory-agent-backend"
+      OTEL_EXPORTER_OTLP_ENDPOINT = data.aws_ssm_parameter.grafana_otlp_endpoint.value
+      OTEL_EXPORTER_OTLP_HEADERS  = data.aws_ssm_parameter.grafana_otlp_headers.value
     }
   }
 
@@ -80,11 +91,11 @@ resource "aws_s3_bucket_ownership_controls" "exports" {
 # Lambda Function URL (cheaper than API Gateway — 71% savings)
 resource "aws_lambda_function_url" "this" {
   function_name      = aws_lambda_function.this.function_name
-  authorization_type = "NONE"  # Demo only — add auth for production
+  authorization_type = "NONE" # Demo only — add auth for production
 
   cors {
-    allow_origins = ["*"]  # Restrict to frontend domain in production
-    allow_methods = ["GET", "POST", "DELETE", "HEAD"]  # Max 6 chars per method (OPTIONS auto-handled)
+    allow_origins = ["*"]                             # Restrict to frontend domain in production
+    allow_methods = ["GET", "POST", "DELETE", "HEAD"] # Max 6 chars per method (OPTIONS auto-handled)
     # Lowercase: AWS echoes these back lowercased — matching prevents a perpetual plan diff
     allow_headers = ["authorization", "content-type", "x-device-id", "idempotency-key"]
     max_age       = 600
@@ -106,7 +117,7 @@ resource "aws_lambda_permission" "function_url_invoke" {
 # CloudWatch Log Group with 7-day retention (hackathon cost optimization)
 resource "aws_cloudwatch_log_group" "lambda" {
   name              = "/aws/lambda/${var.function_name}"
-  retention_in_days = 7  # Short retention to stay within 5GB free tier
+  retention_in_days = 7 # Short retention to stay within 5GB free tier
 
   tags = {
     Name = "Lambda Logs"
