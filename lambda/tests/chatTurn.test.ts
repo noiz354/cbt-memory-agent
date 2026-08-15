@@ -3,20 +3,21 @@
  *
  * `getMemoryContext`:
  * - memoryIds eksplisit → query by id (heuristik), TANPA embedding.
- * - tanpa memoryIds → embed userMessage + cosine query, digabung dgn heuristik
- *   via Reciprocal Rank Fusion (mode=hybrid).
+ * - tanpa memoryIds → embed userMessage + keyword (full-text) + cosine query,
+ *   digabung via Reciprocal Rank Fusion (mode=hybrid, 3 set).
  * - embedding gagal → fallback heuristik murni (mode=heuristic, failed=true).
  */
 
 import { describe, expect, it, vi } from "vitest";
 import { getMemoryContext } from "../handlers/chatTurn";
 
-function crdbMock(heuristicRows: any[] = [], vectorRows: any[] = []) {
+function crdbMock(heuristicRows: any[] = [], vectorRows: any[] = [], keywordRows: any[] = []) {
   const queries: { sql: string; params?: unknown[] }[] = [];
   const crdb: any = {
     queries,
     async query(sql: string, params?: unknown[]) {
       queries.push({ sql, params });
+      if (sql.includes("@@ plainto_tsquery('english'")) return keywordRows;
       if (sql.includes("ORDER BY e.embedding <=> $1::vector")) return vectorRows;
       return heuristicRows;
     },
@@ -53,23 +54,30 @@ describe("getMemoryContext — hybrid retrieval", () => {
     expect(crdb.queries[0].sql).toContain("id = ANY");
   });
 
-  it("embeds userMessage and fuses heuristic + vector via RRF (hybrid mode)", async () => {
-    const crdb = crdbMock(H, V);
+  it("embeds userMessage and fuses heuristic + keyword + vector via RRF (hybrid mode)", async () => {
+    const crdb = crdbMock(H, V, [H[1]]);
     const llm = llmMock(EMBED);
     const res = await getMemoryContext(crdb, llm, "u1", [], "anxious about noise");
     expect(llm.generateEmbedding).toHaveBeenCalledWith("anxious about noise");
     expect(res.mode).toBe("hybrid");
-    expect(crdb.queries).toHaveLength(2);
-    const vectorSql = crdb.queries[1].sql;
+    expect(crdb.queries).toHaveLength(3);
+    // heuristic (0) → keyword full-text (1) → vector (2)
+    const keywordSql = crdb.queries[1].sql;
+    expect(keywordSql).toContain("to_tsvector('english', mn.title || ' ' || COALESCE(mn.excerpt, '')) @@ plainto_tsquery('english', $2)");
+    expect(keywordSql).toContain("mn.user_id = $1::uuid");
+    expect(keywordSql).toContain("ts_rank(to_tsvector('english', mn.title || ' ' || COALESCE(mn.excerpt, '')), plainto_tsquery('english', $2)) DESC");
+    expect(crdb.queries[1].params?.[0]).toBe("u1");
+    const vectorSql = crdb.queries[2].sql;
     expect(vectorSql).toContain("mn.verified = true");
     expect(vectorSql).toContain("e.user_id = $2::uuid");
     expect(vectorSql).toContain("ORDER BY e.embedding <=> $1::vector");
     expect(vectorSql).not.toContain("IS NOT NULL");
-    expect(crdb.queries[1].params?.[0]).toBeTruthy();
-    // RRF boost: h1 hadir di kedua list (rank1 heuristik + rank2 vector) → naik
-    // di atas h2 (heuristik-only), dan v1 (vector-only) ikut masuk.
+    expect(crdb.queries[2].params?.[0]).toBeTruthy();
+    // RRF boost: h1 hadir di heuristik (rank1) + vector (rank2) → naik di atas
+    // h2 (heuristik + keyword), dan v1 (vector-only) ikut masuk.
     expect(res.rows[0].id).toBe("h1");
     expect(res.rows.map((r) => r.id)).toContain("v1");
+    expect(res.rows.map((r) => r.id)).toContain("h2");
   });
 
   it("falls back to heuristic when embedding fails (mode=heuristic, failed=true)", async () => {

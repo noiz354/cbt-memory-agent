@@ -79,7 +79,7 @@ export async function handleChatTurn(
     const userId = await upsertUser(crdb, token);
 
     // 3. Memory context (span semantik bisnis; span db.query dibuat oleh wrapper crdb)
-    const { rows: memories, mode, embeddingMs, failed } = await withSpan(
+    const { rows: memories, mode, embeddingMs, keywordMs, failed } = await withSpan(
       "agent.memory.retrieve",
       rootCtx,
       async (span) => {
@@ -88,6 +88,7 @@ export async function handleChatTurn(
         span.setAttribute("memory.results", res.rows.length);
         span.setAttribute("memory.mode", res.mode);
         if (res.embeddingMs !== undefined) span.setAttribute("memory.embedding_ms", res.embeddingMs);
+        if (res.keywordMs !== undefined) span.setAttribute("memory.keyword_ms", res.keywordMs);
         if (res.failed) span.setAttribute("memory.failed", true);
         return res;
       },
@@ -198,16 +199,17 @@ export interface MemoryRetrievalResult {
   rows: MemoryContext[];
   mode: "heuristic" | "hybrid";
   embeddingMs?: number;
+  keywordMs?: number;
   failed?: boolean;
 }
 
 /**
- * Hybrid memory retrieval (Gap 1+2).
+ * Hybrid memory retrieval (Gap 1+2 + keyword full-text).
  *
  * - memoryIds eksplisit → query by id (heuristik murni, tanpa embedding).
  * - tanpa memoryIds → embed userMessage + cosine query (filter verified/confidence,
- *   prefix user_id, dedup-by-node untuk chunking), lalu fuse dgn hasil heuristik
- *   via Reciprocal Rank Fusion (k=60, top 8).
+ *   prefix user_id) + keyword full-text (inverted index to_tsvector), lalu fuse
+ *   ketiganya via Reciprocal Rank Fusion (k=60, top 8).
  * - embedding gagal → fallback heuristik murni (chat tetap jalan), failed=true.
  */
 export async function getMemoryContext(
@@ -245,6 +247,21 @@ export async function getMemoryContext(
   }
   const embeddingMs = Date.now() - startedAt;
 
+  const keywordStartedAt = Date.now();
+  const keywordRows = await crdb.query<MemoryContext>(
+    `SELECT mn.id, mn.title, COALESCE(mn.excerpt, '') AS excerpt,
+            COALESCE(mn.crisis_flag, false) AS crisisFlag
+     FROM memory_nodes mn
+     WHERE mn.user_id = $1::uuid
+       AND mn.verified = true
+       AND mn.confidence >= 0.6
+       AND to_tsvector('english', mn.title || ' ' || COALESCE(mn.excerpt, '')) @@ plainto_tsquery('english', $2)
+     ORDER BY ts_rank(to_tsvector('english', mn.title || ' ' || COALESCE(mn.excerpt, '')), plainto_tsquery('english', $2)) DESC
+     LIMIT $3`,
+    [userId, userMessage, 8],
+  );
+  const keywordMs = Date.now() - keywordStartedAt;
+
   const vectorRows = await crdb.query<MemoryContext>(
     `SELECT mn.id, mn.title, COALESCE(mn.excerpt, '') AS excerpt,
             COALESCE(mn.crisis_flag, false) AS crisisFlag
@@ -262,9 +279,10 @@ export async function getMemoryContext(
   );
 
   return {
-    rows: reciprocalRankFusion<MemoryContext>([heuristicRows, vectorRows], 60, 8),
+    rows: reciprocalRankFusion<MemoryContext>([heuristicRows, keywordRows, vectorRows], 60, 8),
     mode: "hybrid",
     embeddingMs,
+    keywordMs,
   };
 }
 

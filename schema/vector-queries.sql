@@ -53,3 +53,25 @@ WHERE mn.user_id = '00000000-0000-0000-0000-000000000000'::uuid
   AND mn.confidence >= 0.6
 ORDER BY sub.distance
 LIMIT 8;
+
+-- 6. Query keyword full-text (hybrid keyword+vector, Gap utilisasi) — cek
+--    index inverted memory_nodes_search_idx terpakai (custom plan + operator
+--    `inverted filter`), bukan full scan. Ekspresi di query HARUS identik
+--    dengan ekspresi index. CATATAN: tulis tsquery LITERAL di kanan `@@`
+--    (CRDB tidak men-constant-fold plainto_tsquery saat plan → untuk
+--    mengecek plan gunakan literal; runtime memakai param plainto_tsquery
+--    dan tetap memakai index via custom plan).
+EXPLAIN ANALYZE
+SELECT mn.id, mn.title, COALESCE(mn.excerpt, '') AS excerpt,
+       COALESCE(mn.crisis_flag, false) AS crisisFlag,
+       ts_rank(to_tsvector('english', mn.title || ' ' || COALESCE(mn.excerpt, '')),
+               plainto_tsquery('english', 'anxiety')) AS rank
+FROM memory_nodes mn
+WHERE mn.user_id = '00000000-0000-0000-0000-000000000000'::uuid
+  AND mn.verified = true
+  AND mn.confidence >= 0.6
+  AND to_tsvector('english', mn.title || ' ' || COALESCE(mn.excerpt, ''))
+      @@ plainto_tsquery('english', 'anxiety')
+ORDER BY ts_rank(to_tsvector('english', mn.title || ' ' || COALESCE(mn.excerpt, '')),
+                 plainto_tsquery('english', 'anxiety')) DESC
+LIMIT 8;

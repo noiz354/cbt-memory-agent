@@ -77,6 +77,15 @@ CREATE TABLE IF NOT EXISTS memory_nodes (
   INDEX memory_nodes_last_touched_idx (last_touched)
 );
 
+-- Full-text search untuk hybrid keyword+vector retrieval (Gap utilisasi vector).
+-- Expression INVERTED INDEX (GIN) ber-prefix user_id — CRDB menolak computed
+-- column STORED (concatenation/cast context-dependent). Ekspresi TIDAK memakai
+-- tags (array cast context-dependent → ditolak). Query keyword (chatTurn.ts
+-- getMemoryContext) memakai `to_tsvector('english', ...) @@ plainto_tsquery(...)`
+-- + equality user_id.
+CREATE INVERTED INDEX IF NOT EXISTS memory_nodes_search_idx
+  ON memory_nodes (user_id, to_tsvector('english', title || ' ' || COALESCE(excerpt, '')));
+
 -- ─────────────────────────────────────────────
 -- Memory Edges (graph relationships)
 -- ─────────────────────────────────────────────

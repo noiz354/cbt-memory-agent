@@ -112,6 +112,17 @@ LIMIT $4
   query (prefix user) → pastikan operator `vector search`; ukur latensi; coba
   `SET vector_search_beam_size`.
 
+### C8 Hybrid keyword+vector (Gap utilisasi — amendment 2026-08-15)
+- `getMemoryContext` fuse **3 set** via RRF (k=60, top 8): heuristik + keyword
+  full-text + vector.
+- Schema: expression INVERTED INDEX `memory_nodes_search_idx ON memory_nodes
+  (user_id, to_tsvector('english', title || ' ' || COALESCE(excerpt, '')))`.
+  Bukan computed column (CRDB menolak context-dependent pada STORED column).
+- Observability otomatis: `scripts/vector-health-check.ts` (coverage per user +
+  index full-text + EXPLAIN `vector search`; exit 1 saat regresi) + workflow
+  `.github/workflows/vector-health.yml` (cron 06:00 UTC) + dashboard
+  `infra/grafana/vector-dashboard.json` (uid `vector-indexing`).
+
 ## 4. Kontrak Data (tidak berubah)
 
 Tabel `embeddings` tetap: `(id, user_id, node_id, embedding vector(1024), text_source, created_at)`.
@@ -134,6 +145,15 @@ Tabel `embeddings` tetap: `(id, user_id, node_id, embedding vector(1024), text_s
 - [x] Chunking: excerpt 6000 char → ≥3 baris embeddings `chunk-N`.
 - [x] `cd lambda && npx tsc --noEmit && npm test` hijau (suite + tes baru) — 86/86.
 - [x] Span attrs mode/embedding_ms/failed muncul.
+- [x] Hybrid keyword+vector: RRF 3 set (unit test: query keyword memakai
+  `to_tsvector(...) @@ plainto_tsquery(...)` + equality user_id; ORDER BY ts_rank).
+- [x] Index full-text live (`pg_indexes`); keyword query runtime memakai
+  `memory_nodes_search_idx` (custom plan + `inverted filter`, terbukti live kata langka).
+- [x] Health-check otomatis: `scripts/vector-health-check.ts --min-coverage 95` → OK
+  (coverage 3/3 = 100%, index full-text ada, EXPLAIN vector search YES).
+- [x] Dashboard observability `infra/grafana/vector-dashboard.json` ter-import
+  (provisioning loop `infra/grafana/*.json`) + workflow health (cron + dispatch).
+- [x] Frontend `npm run typecheck` clean.
 
 ## 7. Boundaries
 - Always: TDD per modul; jalankan seluruh suite sebelum commit.
