@@ -264,4 +264,5 @@ Fondasi event stream produksi, funnel aktivasi, dan cohort retention. **✅ DEPL
 - [x] **Seed live** — users 40 (cohorts 03:2/04:4/05:12/06:9/07:5/08:13), subscriptions 40, user_events 385 (page_view 129, signup 40, onboarding 31, message 30, finalized 19).
 - [x] **Deploy live** — `terraform apply` (source_code_hash, version 11) → Lambda dengan 3 route analytics baru. Curl live: funnel?period=2026-06 → {signup 9, onboarding 6, message 7, finalized 3}; activity → {dau 2, wau 13, mau 24, sticky 0.08}; retention → matrix cohort 03/04/05/06, ages 0-3, decay 100→50 / 100→91.67.
 - [x] **Grafana E2E** — POST /api/ds/query funnel (CASE WHEN) → 40|31|30|19 via proxy Grafana, cocok dengan psql.
+- [x] **Commits** — `6b71b63` feat(telemetry), `e1c8049` feat(analytics), `7c72b8f` feat(analytics), `a958303` docs(analytics). Working tree bersih.
 - [ ] **Masih terbuka** — endpoint analytics = agregat lintas-user (wajar untuk app single-user/demo; hardening rate-limit/auth-admin dicatat di ADR-003); sumber aktivitas `users.last_active` hanya ter-update oleh seed — perlu update berkala di produksi.
