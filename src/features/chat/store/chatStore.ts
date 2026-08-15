@@ -36,7 +36,8 @@ interface ChatState {
   removeAttachment: (id: string) => void;
   injectMemory: (memory: CoreMemory) => void;
   removePendingMemory: (id: string) => void;
-  sendMessage: (content?: string) => void;
+  setActiveSession: (sessionId: string | null) => void;
+  sendMessage: (content?: string, audio?: { durationMs: number; peaks: number[]; src: string }) => void;
   appendStreamToken: (token: string) => void;
   finishStream: () => void;
   setCameraOpen: (open: boolean) => void;
@@ -108,7 +109,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   isStreaming: false,
   activeDropZone: null,
   activeSessionId: uid("ses"),
-  face: { expression: "neutral", confidence: 0.42, updatedAt: Date.now() },
+  face: { expression: "neutral", confidence: 0.42, updatedAt: Date.now(), model: "fallback" },
   cameraOpen: false,
   recording: false,
   bargeIn: false,
@@ -131,7 +132,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((s) => ({
       pendingMemories: s.pendingMemories.filter((m) => m.id !== id),
     })),
-  sendMessage: (content) => {
+  setActiveSession: (sessionId) =>
+    set({
+      activeSessionId: sessionId ?? uid("ses"),
+    }),
+  sendMessage: (content, audio?) => {
     const state = get();
     const text = (content ?? state.composer).trim();
     if (!text && state.pendingAttachments.length === 0) return;
@@ -145,6 +150,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       quotedFromId: state.quote?.messageId,
       attachments: state.pendingAttachments,
       injectedMemories: state.pendingMemories,
+      audio,
     };
 
     if (crisis) {
@@ -278,6 +284,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           ? {
               ...m,
               streaming: false,
+              truncated: true,
               content: `${m.content}\n\n*— barge-in: generation halted locally —*`,
             }
           : m,

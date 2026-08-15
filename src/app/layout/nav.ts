@@ -3,6 +3,7 @@ import {
   History,
   Network,
   ShieldCheck,
+  ChartColumn,
   type LucideIcon,
 } from "lucide-react";
 
@@ -17,5 +18,6 @@ export const APP_NAV: NavItem[] = [
   { to: "/chat", label: "Workspace", hint: "Live CBT stream", icon: MessageSquareText },
   { to: "/sessions", label: "Sessions", hint: "History & mood", icon: History },
   { to: "/memory", label: "Memory", hint: "Spatial vault", icon: Network },
+  { to: "/metrics", label: "Metrics", hint: "Clinical signals", icon: ChartColumn },
   { to: "/settings/privacy", label: "Privacy", hint: "Data hub", icon: ShieldCheck },
 ];

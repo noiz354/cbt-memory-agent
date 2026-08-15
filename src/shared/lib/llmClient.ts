@@ -14,6 +14,7 @@ import type { LLMProviderId } from "@/shared/lib/llmRegistry";
 import { getProvider, getModel } from "@/shared/lib/llmRegistry";
 import { getApiKey } from "@/shared/lib/byokKeyManager";
 import { getAuthHeaders } from "@/shared/lib/authSession";
+import { generateOnDevice } from "@/shared/lib/onDeviceLLM";
 
 // ─────────────────────────────────────────────
 // Types
@@ -150,16 +151,30 @@ export async function callLLMWithFallback(
 // ─────────────────────────────────────────────
 
 async function callOnDeviceLLM(
-  _request: LLMRequest,
-  _onStream: LLMStreamCallback | undefined,
-  _started: number,
+  request: LLMRequest,
+  onStream: LLMStreamCallback | undefined,
+  started: number,
 ): Promise<LLMResponse> {
-  // TODO: Integrasikan @mlc-ai/web-llm saat model di-load.
-  // Fail-closed: WebLLM belum tersedia, jadi THROW agar fallback chain
-  // (backend-proxy → BYOK) benar-benar dijalankan. Sebelumnya fungsi ini
-  // "sukses" dengan placeholder → placeholder selalu menang dan backend tidak
-  // pernah dijangkau, plus isStreaming macet selamanya (onStream tak pernah dipanggil).
-  throw new Error("WebLLM belum di-load. On-device provider tidak tersedia — fallback ke backend.");
+  try {
+    const result = await generateOnDevice(request.messages, (delta) => {
+      onStream?.({ delta, done: false });
+    });
+    onStream?.({ delta: "", done: true });
+    return {
+      content: result.content,
+      providerId: "local-webllm",
+      modelId: request.modelId,
+      tokensUsed: result.tokensUsed,
+      latencyMs: Date.now() - started,
+    };
+  } catch (err) {
+    // Fail-closed: any on-device failure (unsupported browser, missing WebGPU,
+    // model load error) throws so the fallback chain (backend-proxy → BYOK)
+    // actually runs. Never return a placeholder.
+    throw new Error(
+      `On-device LLM unavailable: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
 }
 
 // ─────────────────────────────────────────────

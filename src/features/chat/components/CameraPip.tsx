@@ -116,7 +116,9 @@ export function CameraPip() {
 
       <div className="mt-2 flex items-center justify-between px-1 text-[11px]">
         <span className="capitalize text-white/80">{face.expression}</span>
-        <span className="text-white/60">{Math.round(face.confidence * 100)}%</span>
+        <span className="text-white/60">
+          {Math.round(face.confidence * 100)}% · {face.model === "mediapipe" ? "ML" : "approx"}
+        </span>
       </div>
 
       {cameraOpen && (

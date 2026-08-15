@@ -48,7 +48,7 @@ export function ChatSafetyHeader() {
   return (
     <div className="flex flex-wrap items-center justify-end gap-2">
       <Badge tone="teal">CBT Master · on-device</Badge>
-      <Badge>TTS pending</Badge>
+      <Badge>{typeof window !== "undefined" && "speechSynthesis" in window ? "TTS ready" : "TTS unavailable"}</Badge>
       <Badge>
         Sesi · {mm}:{ss}
       </Badge>

@@ -235,6 +235,14 @@ export const apiClient = {
       deviceId,
     }),
 
+  /** DELETE /memory/edge/:id — Hapus edge dari CockroachDB. */
+  deleteMemoryEdge: (id: string, token: string, deviceId: string) =>
+    api<{ v: 1; ok: true; deletedEdgeId: string }>(`/memory/edge/${id}`, {
+      method: "DELETE",
+      token,
+      deviceId,
+    }),
+
   /** GET /memory/semantic — Semantic search via Distributed Vector Indexing. */
   searchMemory: (
     q: string,
@@ -271,6 +279,24 @@ export const apiClient = {
       `/sessions?status=${status}&query=${encodeURIComponent(query)}`,
       { token, deviceId },
     ),
+
+  /** GET /session/:id/turns — Chat transcript untuk satu session. */
+  listSessionTurns: (
+    sessionId: string,
+    token: string,
+    deviceId: string,
+  ) =>
+    api<{
+      v: 1;
+      turns: {
+        id: string;
+        role: "user" | "assistant" | "system";
+        content: string;
+        tokensUsed: number;
+        injectedMemoryIds: string[];
+        createdAt: string;
+      }[];
+    }>(`/session/${sessionId}/turns`, { token, deviceId }),
 
   /** POST /export — Mint export bundle, upload ke S3. */
   exportBundle: (

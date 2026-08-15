@@ -145,10 +145,22 @@ export const useSessionStore = create<SessionState>()(
           });
         }
       },
-      setStatus: (id, status) =>
+      setStatus: (id, status) => {
         set((s) => ({
           sessions: s.sessions.map((session) => (session.id === id ? { ...session, status } : session)),
-        })),
+        }));
+
+        // Persist status change to backend (POST /session upserts by id).
+        const updated = get().sessions.find((s) => s.id === id);
+        const auth = getAuthHeaders();
+        if (updated && auth) {
+          apiClient.saveSession(
+            { v: 1, session: updated },
+            auth.token,
+            auth.deviceId,
+          ).catch((err) => console.warn("[API] Failed to sync status to backend:", err));
+        }
+      },
       highlight: (highlightedId) => set({ highlightedId }),
       openCompare: (a, b) => {
         if (a === b) return;

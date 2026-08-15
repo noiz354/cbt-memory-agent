@@ -211,6 +211,29 @@ export async function handleDeleteMemory(
   }
 }
 
+export async function handleDeleteMemoryEdge(
+  id: string,
+  crdb: CrdbClient,
+  token: string,
+  deviceId: string,
+): Promise<APIGatewayProxyResult> {
+  try {
+    const userId = await getUserId(crdb, token);
+    await crdb.execute(
+      `DELETE FROM memory_edges WHERE id = $1 AND user_id = $2::uuid`,
+      [id, userId],
+    );
+    return { statusCode: 200, headers: CORS, body: JSON.stringify({ v: 1, ok: true, deletedEdgeId: id }) };
+  } catch (err) {
+    console.error("deleteMemoryEdge error:", err);
+    return {
+      statusCode: 500,
+      headers: CORS,
+      body: JSON.stringify({ error: "Failed to delete memory edge" }),
+    };
+  }
+}
+
 async function getUserId(crdb: CrdbClient, token: string): Promise<string> {
   const row = await crdb.queryOne<{ user_id: string }>(
     `SELECT md5($1::string)::uuid::text AS user_id`,

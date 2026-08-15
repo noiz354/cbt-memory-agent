@@ -1,4 +1,5 @@
 import { AlignmentGuides } from "@/features/memory/components/AlignmentGuides";
+import { AddMemoryModal } from "@/features/memory/components/AddMemoryModal";
 import { GraphEdges } from "@/features/memory/components/GraphEdges";
 import { GraphNodeCard } from "@/features/memory/components/GraphNodeCard";
 import { GraphToolbar } from "@/features/memory/components/GraphToolbar";
@@ -38,6 +39,7 @@ export function GraphCanvas() {
   const [purgeArmed, setPurgeArmed] = useState(false);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
   const fitted = useRef(false);
 
   useEffect(() => {
@@ -202,6 +204,7 @@ export function GraphCanvas() {
         onZoomOut={() => zoomBy(0.9)}
         onFit={() => fit(boundsOf(nodes))}
         onReset={reset}
+        onAddNode={() => setAddOpen(true)}
       />
 
       <div className="pointer-events-none absolute bottom-5 left-4 z-20 max-w-xs text-[11px] leading-5 text-ink-mute">
@@ -217,6 +220,7 @@ export function GraphCanvas() {
 
       <PurgeZone armed={purgeArmed} />
       <NodeInspector />
+      {addOpen && <AddMemoryModal onClose={() => setAddOpen(false)} />}
     </div>
   );
 }

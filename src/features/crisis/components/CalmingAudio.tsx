@@ -2,11 +2,15 @@ import { cn } from "@/shared/lib/cn";
 import { Waves } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-/** On-device binaural-ish bed. No file fetch. Starts only on user gesture. */
+/**
+ * On-device binaural bed. No file fetch. Starts only on user gesture.
+ * Two oscillators panned hard L/R (StereoPannerNode) so the carrier-fre- quency
+ * difference (174 vs 180 Hz) is perceived as a true 6 Hz binaural beat.
+ */
 export function CalmingAudio() {
   const [on, setOn] = useState(false);
   const ctxRef = useRef<AudioContext | null>(null);
-  const nodes = useRef<{ a: OscillatorNode; b: OscillatorNode; gain: GainNode } | null>(null);
+  const nodes = useRef<{ a: OscillatorNode; b: OscillatorNode; pL: StereoPannerNode; pR: StereoPannerNode; gain: GainNode } | null>(null);
 
   const stop = () => {
     nodes.current?.a.stop();
@@ -28,12 +32,18 @@ export function CalmingAudio() {
     b.type = "sine";
     a.frequency.value = 174;
     b.frequency.value = 180;
-    a.connect(gain);
-    b.connect(gain);
+    const pL = ctx.createStereoPanner();
+    const pR = ctx.createStereoPanner();
+    pL.pan.value = -1;
+    pR.pan.value = 1;
+    a.connect(pL);
+    pL.connect(gain);
+    b.connect(pR);
+    pR.connect(gain);
     gain.connect(ctx.destination);
     a.start();
     b.start();
-    nodes.current = { a, b, gain };
+    nodes.current = { a, b, pL, pR, gain };
     setOn(true);
   };
 

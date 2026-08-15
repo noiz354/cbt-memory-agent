@@ -168,3 +168,22 @@ Fix dari AUDIT/WEB-QUALITY/SECURITY diimplementasikan; `npm run typecheck` (fron
 - [x] **Empty state hydrate gagal** — `memoryStore`/`sessionStore` set `[]` + `hydrateError` (bukan seed sebagai data asli)
 - [x] **Dokumen audit diperbarui** menandai status fix (AUDIT.md, WEB-QUALITY-AUDIT.md, SECURITY-AUDIT.md §7 remediation log)
 - [ ] **Masih terbuka** (untuk lanjutan): real authN/authZ server-side (verifikasi token vs CRDB users), passkey `credentials.get()`, rewrite copy privasi, `GET /turns` read endpoint, set `ALLOWED_ORIGIN` + rate limit + CSP, route-level code splitting, re-run Lighthouse pada prod build, integrasi WebLLM on-device, wiring `startAudioWorker` (Hold-to-talk)
+
+## Phase A + B (2026-08-15) — implementasi WORK-LIST
+
+Semua item Phase A (on-device) + Phase B (no-UI features) dari `docs/15-8-26/WORK-LIST.md` selesai. `npm run typecheck` (frontend) + `npx tsc --noEmit` (lambda/) PASS.
+
+- [x] **1.5 Binaural** — `CalmingAudio.tsx` dua `StereoPannerNode` (L=-1, R=+1), 174/180Hz → beat 6Hz stereo beneran (bukan monophonic)
+- [x] **1.6 TTS** — `src/shared/lib/speech.ts` (speechSynthesis: speak/stop/isSpeaking/toggle); tombol **Speak/Stop** di tiap balasan assistant (`ChatBubble`); badge header `TTS ready/unavailable` jujur
+- [x] **1.4 Face expression real** — `@mediapipe/tasks-vision` + model `face_landmarker.task` (3.7MB, `public/models/`); worker baru `classifyBlendshapes` (distressed/tense/sad/engaged/neutral), fallback luma hanya jika model gagal load; `FaceSignal.model` label `ML`/`approx`
+- [x] **1.7 Waveform playback + truncated** — `WaveformScrubber` pakai `HTMLAudioElement` real (play/pause, scrub seek); `triggerBargeIn` kini set `truncated: true` → tombol "Auto-resume" jadi reachable
+- [x] **1.2+1.3 Voice notes** — `@huggingface/transformers` + worker Whisper (`transcribe.worker.ts`, `onnx-community/whisper-tiny`); `voiceNote.ts` merekam mic (MediaRecorder) + wiring `startAudioWorker` (VAD+level); `HoldToTalkOrb` kirim transkrip + blob audio (waveform playable)
+- [x] **1.1 WebLLM** — `@mlc-ai/web-llm` + `src/shared/lib/onDeviceLLM.ts` (MLCEngine lazy, Phi-3-mini-4k Q4, streaming via `chat.completions`); `callOnDeviceLLM` kini benar-benar inferensi on-device; gagal → throw (fallback chain tetap jalan)
+- [x] **2.1 Semantic memory search UI** — `MemoryPage` debounce 400ms → `apiClient.searchMemory` (GET `/memory/semantic`), hasil chip clickable; fallback substring lokal
+- [x] **2.2 Add-memory-node UI** — `memoryStore.addNode` (+ `syncNode` ke backend); tombol "Add memory" di `GraphToolbar`; `AddMemoryModal` dialog baru
+- [x] **2.6 Kanban status persist** — `sessionStore.setStatus` kini `apiClient.saveSession` (upsert) → status bertahan di CockroachDB
+- [x] **2.7 Memory persist + edge-delete** — `moveNode`/`touch`/`verify`/`updateNode` sync via `syncNode`; `unlink` → `apiClient.deleteMemoryEdge` (endpoint `DELETE /memory/edge/:id` baru di `memory.ts` + routing)
+- [x] **2.5 Session detail transcript** — `GET /session/:id/turns` baru (`handlers/turns.ts`) baca `chat_turns`; `SessionDetailPage` render transkrip; tombol continue → `/chat?session=…`
+- [x] **2.3 Metrics page + /metrics real** — `handleMetrics` query real (sessions/memory/chat_turns/audit_events per-user); halaman `/metrics` baru + nav "Metrics"
+- [x] **2.4 S3 export real** — `handleExport` kumpulkan bundle (sessions/memories/edges/turns/audit) → `s3.uploadExport` (presigned URL); `ExportBuilder` tombol "Upload to S3" wire `uploadExportBundle` (sebelumnya dead code)
+- [ ] **Masih terbuka** (Phase C/D): real authN/authZ, passkey `credentials.get()`, rewrite copy privasi, rate limit + server audit, `ALLOWED_ORIGIN` ter-set, CSP + code splitting, re-run Lighthouse prod build

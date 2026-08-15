@@ -3,10 +3,11 @@ import type { ChatMessage } from "@/features/chat/types";
 import { useChatStore } from "@/features/chat/store/chatStore";
 import { cn } from "@/shared/lib/cn";
 import { formatClock } from "@/shared/lib/format";
+import { isSpeaking, toggleSpeak } from "@/shared/lib/speech";
 import { useDraggable } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
 import { motion } from "framer-motion";
-import { FileText, GripVertical, ImageIcon, Quote, Sparkles } from "lucide-react";
+import { FileText, GripVertical, ImageIcon, Quote, Sparkles, Volume2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { WaveformScrubber } from "./WaveformScrubber";
 
@@ -166,6 +167,7 @@ export function ChatBubble({ message }: ChatBubbleProps) {
               peaks={message.audio.peaks}
               durationMs={message.audio.durationMs}
               onBargeIn={triggerBargeIn}
+              src={message.audio.src}
             />
             <p className="mt-1 text-[11px] text-ink-mute">Swipe left on the wave to barge-in</p>
           </div>
@@ -174,19 +176,30 @@ export function ChatBubble({ message }: ChatBubbleProps) {
         <footer className="mt-2 flex items-center justify-between gap-3 text-[11px] opacity-70">
           <time dateTime={message.createdAt}>{formatClock(message.createdAt)}</time>
           {!isUser && !isSystem && (
-            <button
-              type="button"
-              className="inline-flex items-center gap-1 font-medium hover:text-teal"
-              onClick={() =>
-                setQuote({
-                  messageId: message.id,
-                  excerpt: message.content.replace(/\s+/g, " ").slice(0, 140),
-                })
-              }
-            >
-              <Quote className="size-3" />
-              Quote
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 font-medium hover:text-teal"
+                aria-label="Speak this reply aloud"
+                onClick={() => toggleSpeak(message.content)}
+              >
+                <Volume2 className="size-3" />
+                {isSpeaking(message.content) ? "Stop" : "Speak"}
+              </button>
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 font-medium hover:text-teal"
+                onClick={() =>
+                  setQuote({
+                    messageId: message.id,
+                    excerpt: message.content.replace(/\s+/g, " ").slice(0, 140),
+                  })
+                }
+              >
+                <Quote className="size-3" />
+                Quote
+              </button>
+            </div>
           )}
         </footer>
       </div>

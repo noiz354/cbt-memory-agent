@@ -5,6 +5,7 @@ import { AuthPage } from "@/features/auth/pages/AuthPage";
 import { OnboardingPage } from "@/features/auth/pages/OnboardingPage";
 import { ChatPage } from "@/features/chat/pages/ChatPage";
 import { MemoryPage } from "@/features/memory/pages/MemoryPage";
+import { MetricsPage } from "@/features/metrics/pages/MetricsPage";
 import { PrivacyPage } from "@/features/privacy/pages/PrivacyPage";
 import { SessionDetailPage } from "@/features/sessions/pages/SessionDetailPage";
 import { SessionsPage } from "@/features/sessions/pages/SessionsPage";
@@ -28,6 +29,7 @@ export const router = createBrowserRouter([
       { path: "sessions/:sessionId", element: <SessionDetailPage /> },
       { path: "memory", element: <MemoryPage /> },
       { path: "memory/:memoryId", element: <MemoryPage /> },
+      { path: "metrics", element: <MetricsPage /> },
       { path: "settings/privacy", element: <PrivacyPage /> },
     ],
   },

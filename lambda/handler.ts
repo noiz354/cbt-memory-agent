@@ -11,9 +11,10 @@ import { OpenRouterClient } from "./lib/openrouter";
 import { S3ClientService } from "./lib/s3";
 import { validateAuth } from "./middleware/auth";
 import { handleChatTurn } from "./handlers/chatTurn";
-import { handleListMemory, handleUpsertMemory, handleDeleteMemory } from "./handlers/memory";
+import { handleListMemory, handleUpsertMemory, handleDeleteMemory, handleDeleteMemoryEdge } from "./handlers/memory";
 import { handleSemanticSearch } from "./handlers/semanticSearch";
 import { handleSaveSession, handleListSessions } from "./handlers/session";
+import { handleListSessionTurns } from "./handlers/turns";
 import { handleExport } from "./handlers/export";
 import { handlePurge } from "./handlers/purge";
 import { handleMetrics, handleHealth } from "./handlers/health";
@@ -73,6 +74,10 @@ export async function handler(
     if (method === "POST" && path === "/api/v1/memory") {
       return await handleUpsertMemory(event, crdb, token, deviceId);
     }
+    if (method === "DELETE" && path.startsWith("/api/v1/memory/edge/")) {
+      const id = path.split("/").pop()!;
+      return await handleDeleteMemoryEdge(id, crdb, token, deviceId);
+    }
     if (method === "DELETE" && path.startsWith("/api/v1/memory/")) {
       const id = path.split("/").pop()!;
       return await handleDeleteMemory(id, crdb, token, deviceId);
@@ -89,6 +94,10 @@ export async function handler(
     if (method === "GET" && path === "/api/v1/sessions") {
       const qs = queryStringParameters;
       return await handleListSessions(qs, crdb, token, deviceId);
+    }
+    if (method === "GET" && path.startsWith("/api/v1/session/") && path.endsWith("/turns")) {
+      const sessionId = path.split("/").filter(Boolean).at(-2) ?? "";
+      return await handleListSessionTurns(sessionId, crdb, token, deviceId);
     }
 
     // Export

@@ -1,8 +1,9 @@
-import { buildExportBundle, downloadJson } from "@/features/privacy/lib/exportBundle";
+import { buildExportBundle, downloadJson, uploadExportBundle } from "@/features/privacy/lib/exportBundle";
 import { usePrivacyStore } from "@/features/privacy/store/privacyStore";
 import type { ExportKind } from "@/features/privacy/types";
 import { cn } from "@/shared/lib/cn";
 import { DROP_ZONES, springDropAnimation } from "@/shared/lib/dnd";
+import { toast } from "@/shared/store/toastStore";
 import { Button } from "@/shared/ui/Button";
 import {
   DndContext,
@@ -16,7 +17,7 @@ import {
   type DragEndEvent,
 } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
-import { Brain, Download, MessageSquare, Smile, X } from "lucide-react";
+import { Brain, CloudUpload, Download, Loader2, MessageSquare, Smile, X } from "lucide-react";
 import { useState } from "react";
 
 const CHIPS: { id: ExportKind; label: string; icon: typeof Brain }[] = [
@@ -58,6 +59,7 @@ export function ExportBuilder() {
   const removeFromCrate = usePrivacyStore((s) => s.removeFromCrate);
   const clearCrate = usePrivacyStore((s) => s.clearCrate);
   const [active, setActive] = useState<ExportKind | null>(null);
+  const [uploading, setUploading] = useState(false);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
   const { setNodeRef, isOver } = useDroppable({ id: DROP_ZONES.EXPORT });
 
@@ -71,6 +73,22 @@ export function ExportBuilder() {
     if (crate.length === 0) return;
     const bundle = buildExportBundle(crate);
     downloadJson(bundle, `cbt-export-${new Date().toISOString().slice(0, 10)}.json`);
+  };
+
+  const upload = async () => {
+    if (crate.length === 0) return;
+    setUploading(true);
+    try {
+      const url = await uploadExportBundle(crate);
+      if (url) {
+        toast("Export uploaded", "Your bundle is in S3. Use the download link below.", "success");
+        window.open(url, "_blank", "noopener,noreferrer");
+      } else {
+        toast("Export upload failed", "Server export unavailable — local JSON still works.", "error");
+      }
+    } finally {
+      setUploading(false);
+    }
   };
 
   return (
@@ -106,10 +124,14 @@ export function ExportBuilder() {
           {crate.length === 0 && <p className="text-sm text-ink-mute">Drag Chat, Mood, or Memory here.</p>}
         </div>
       </div>
-      <div className="mt-3 flex gap-2">
+      <div className="mt-3 flex flex-wrap gap-2">
         <Button onClick={mint} disabled={crate.length === 0}>
           <Download className="size-4" />
           Mint local JSON
+        </Button>
+        <Button variant="soft" onClick={upload} disabled={crate.length === 0 || uploading}>
+          {uploading ? <Loader2 className="size-4 animate-spin" /> : <CloudUpload className="size-4" />}
+          {uploading ? "Uploading…" : "Upload to S3"}
         </Button>
         {crate.length > 0 && (
           <Button variant="ghost" onClick={clearCrate}>

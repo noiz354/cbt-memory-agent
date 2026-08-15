@@ -18,6 +18,7 @@ interface MemoryState {
   select: (id: string | null) => void;
   hydrate: () => Promise<void>;
   moveNode: (id: string, x: number, y: number) => void;
+  addNode: (input: { title: string; excerpt?: string; kind?: "core" | "transcript"; x?: number; y?: number }) => string | null;
   linkNodes: (source: string, target: string, label?: string) => boolean;
   unlink: (edgeId: string) => void;
   startPurge: (id: string) => void;
@@ -212,10 +213,35 @@ export const useMemoryStore = create<MemoryState>()(
           });
         }
       },
-      moveNode: (id, x, y) =>
+      moveNode: (id, x, y) => {
         set((s) => ({
           nodes: s.nodes.map((n) => (n.id === id ? { ...n, x, y } : n)),
-        })),
+        }));
+        syncNode(get().nodes.find((n) => n.id === id));
+      },
+      addNode: ({ title, excerpt = "", kind = "core", x, y }) => {
+        const text = title.trim();
+        if (!text) return null;
+        const id = uid("mem");
+        const node: GraphNode = {
+          id,
+          kind,
+          title: text,
+          excerpt: excerpt.trim(),
+          tags: [],
+          weight: 0.55,
+          lastTouched: new Date().toISOString(),
+          x: x ?? 100 + Math.random() * 300,
+          y: y ?? 100 + Math.random() * 220,
+          confidence: 0.5,
+          verified: false,
+          references: 0,
+        };
+        set((s) => ({ nodes: [...s.nodes, node], selectedId: id }));
+        syncNode(node);
+        metric.graphLinkCreated();
+        return id;
+      },
       linkNodes: (source, target, label = "custom") => {
         if (source === target) return false;
         const exists = get().edges.some(
@@ -251,7 +277,16 @@ export const useMemoryStore = create<MemoryState>()(
         metric.graphLinkCreated();
         return true;
       },
-      unlink: (edgeId) => set((s) => ({ edges: s.edges.filter((e) => e.id !== edgeId) })),
+      unlink: (edgeId) => {
+        set((s) => ({ edges: s.edges.filter((e) => e.id !== edgeId) }));
+
+        // Delete edge server-side so it doesn't reappear on next hydrate.
+        const auth = getAuthHeaders();
+        if (auth) {
+          apiClient.deleteMemoryEdge(edgeId, auth.token, auth.deviceId)
+            .catch((err) => console.warn("[API] Failed to delete edge from backend:", err));
+        }
+      },
       startPurge: (id) =>
         set((s) => ({
           burningIds: s.burningIds.includes(id) ? s.burningIds : [...s.burningIds, id],
@@ -273,21 +308,27 @@ export const useMemoryStore = create<MemoryState>()(
 
         metric.purgeFromGraph();
       },
-      touch: (id) =>
+      touch: (id) => {
         set((s) => ({
           selectedId: id,
           nodes: s.nodes.map((n) =>
             n.id === id ? { ...n, lastTouched: new Date().toISOString() } : n,
           ),
-        })),
-      verify: (id) =>
+        }));
+        syncNode(get().nodes.find((n) => n.id === id));
+      },
+      verify: (id) => {
         set((s) => ({
           nodes: s.nodes.map((n) => (n.id === id ? { ...n, verified: true, confidence: Math.max(n.confidence ?? 0, 0.7) } : n)),
-        })),
-      updateNode: (id, patch) =>
+        }));
+        syncNode(get().nodes.find((n) => n.id === id));
+      },
+      updateNode: (id, patch) => {
         set((s) => ({
           nodes: s.nodes.map((n) => (n.id === id ? { ...n, ...patch, lastTouched: new Date().toISOString() } : n)),
-        })),
+        }));
+        syncNode(get().nodes.find((n) => n.id === id));
+      },
       touchRecall: (id) =>
         set((s) => ({
           nodes: s.nodes.map((n) =>
@@ -305,4 +346,17 @@ export const useMemoryStore = create<MemoryState>()(
 
 export function coreMemories() {
   return useMemoryStore.getState().nodes.filter((n) => n.kind === "core");
+}
+
+/** Push a node's current fields to CockroachDB (upsert by id). Fire-and-forget. */
+function syncNode(node: GraphNode | undefined) {
+  if (!node) return;
+  const auth = getAuthHeaders();
+  if (!auth) return;
+  const { references, lastTouched, ...bodyNode } = node;
+  apiClient.upsertMemory(
+    { v: 1, action: "upsert", node: bodyNode },
+    auth.token,
+    auth.deviceId,
+  ).catch((err) => console.warn("[API] Failed to sync node to backend:", err));
 }

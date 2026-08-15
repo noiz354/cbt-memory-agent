@@ -1,7 +1,10 @@
 import { GraphCanvas } from "@/features/memory/components/GraphCanvas";
 import { useMemoryStore } from "@/features/memory/store/memoryStore";
+import { apiClient, type SemanticSearchResult } from "@/shared/lib/apiClient";
+import { getAuthHeaders } from "@/shared/lib/authSession";
 import { BackendSyncStatus } from "@/shared/ui/BackendSyncStatus";
-import { useEffect, useState } from "react";
+import { Search, Sparkles } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 
 export function MemoryPage() {
@@ -14,11 +17,43 @@ export function MemoryPage() {
   const cores = nodes.filter((n) => n.kind === "core").length;
   const chunks = nodes.filter((n) => n.kind === "transcript").length;
   const [query, setQuery] = useState("");
+  const [results, setResults] = useState<SemanticSearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const debounce = useRef<number | null>(null);
   const { memoryId } = useParams();
 
   useEffect(() => {
     if (memoryId) select(memoryId);
   }, [memoryId, select]);
+
+  // Semantic search (backend embeddings) with debounce + local substring fallback.
+  const runSearch = (value: string) => {
+    if (!value.trim()) {
+      setResults([]);
+      return;
+    }
+    const auth = getAuthHeaders();
+    setSearching(true);
+    apiClient
+      .searchMemory(value, auth?.token ?? "", auth?.deviceId ?? "")
+      .then((res) => {
+        setResults(Array.isArray(res.results) ? res.results : []);
+      })
+      .catch(() => {
+        setResults([]);
+      })
+      .finally(() => setSearching(false));
+  };
+
+  const onQueryChange = (value: string) => {
+    setQuery(value);
+    if (debounce.current) window.clearTimeout(debounce.current);
+    debounce.current = window.setTimeout(() => runSearch(value), 400);
+    const hit = nodes.find((n) =>
+      `${n.title} ${n.excerpt} ${n.tags.join(" ")}`.toLowerCase().includes(value.toLowerCase()),
+    );
+    if (value && hit) select(hit.id);
+  };
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -39,24 +74,47 @@ export function MemoryPage() {
           />
         </div>
         <div className="flex items-center gap-3">
-          <input
-            value={query}
-            onChange={(e) => {
-              const value = e.target.value;
-              setQuery(value);
-              const hit = nodes.find((n) =>
-                `${n.title} ${n.excerpt} ${n.tags.join(" ")}`.toLowerCase().includes(value.toLowerCase()),
-              );
-              if (value && hit) select(hit.id);
-            }}
-            placeholder="Search vault…"
-            className="h-9 w-48 rounded-xl border border-line bg-white px-3 text-sm outline-none focus:border-teal"
-          />
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2.5 top-2.5 size-3.5 text-ink-mute" />
+            <input
+              value={query}
+              onChange={(e) => onQueryChange(e.target.value)}
+              placeholder="Search vault…"
+              aria-label="Search memories (local substring + semantic embeddings)"
+              className="h-9 w-56 rounded-xl border border-line bg-white pl-8 pr-3 text-sm outline-none focus:border-teal"
+            />
+          </div>
           <p className="text-xs text-ink-mute">
             {cores} core · {chunks} transcript · on-device
           </p>
         </div>
       </header>
+      {query.trim() && (
+        <div className="shrink-0 border-b border-line bg-white/60 px-4 py-2 md:px-5">
+          {searching ? (
+            <p className="text-xs text-ink-mute">Searching semantically…</p>
+          ) : results.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {results.map((r) => (
+                <button
+                  key={r.node.id}
+                  type="button"
+                  onClick={() => select(r.node.id)}
+                  className="inline-flex max-w-xs items-center gap-1.5 rounded-full bg-teal-mist px-2.5 py-1 text-left text-[11px] font-semibold text-teal hover:bg-teal/15"
+                >
+                  <Sparkles className="size-3 shrink-0" />
+                  <span className="truncate">{r.node.title}</span>
+                  <span className="shrink-0 text-ink-mute">{Math.round(r.score * 100)}%</span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-ink-mute">
+              No semantic matches — embeddings may be empty server-side. Use the local substring search or add memories.
+            </p>
+          )}
+        </div>
+      )}
       <div className="relative min-h-0 flex-1">
         {hydrated && nodes.length === 0 ? (
           <BackendSyncStatus

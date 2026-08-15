@@ -5,14 +5,24 @@ import { MediaDock } from "@/features/chat/components/MediaDock";
 import { MemoryRail } from "@/features/chat/components/MemoryRail";
 import { SpatialDndProvider } from "@/features/chat/components/SpatialDndProvider";
 import { useAuthStore } from "@/features/auth/store/authStore";
+import { useChatStore } from "@/features/chat/store/chatStore";
 import { THERAPY_GOALS } from "@/features/auth/lib/goals";
 import { ChatSafetyHeader } from "@/features/chat/components/ChatSafetyHeader";
 import { Badge } from "@/shared/ui/Badge";
 import { Lock } from "lucide-react";
+import { useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 
 export function ChatPage() {
   const profile = useAuthStore((s) => s.profile);
   const seated = THERAPY_GOALS.filter((goal) => profile?.goals.includes(goal.id));
+  const setActiveSession = useChatStore((s) => s.setActiveSession);
+  const [searchParams] = useSearchParams();
+
+  useEffect(() => {
+    const sessionId = searchParams.get("session");
+    if (sessionId) setActiveSession(sessionId);
+  }, [searchParams, setActiveSession]);
 
   return (
     <SpatialDndProvider>

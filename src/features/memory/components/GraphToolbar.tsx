@@ -1,6 +1,6 @@
 import { IconButton } from "@/shared/ui/IconButton";
 import { Badge } from "@/shared/ui/Badge";
-import { Focus, Minus, Plus, RotateCcw } from "lucide-react";
+import { Focus, Minus, Plus, RotateCcw, Sparkles } from "lucide-react";
 
 interface GraphToolbarProps {
   scale: number;
@@ -10,6 +10,7 @@ interface GraphToolbarProps {
   onZoomOut: () => void;
   onFit: () => void;
   onReset: () => void;
+  onAddNode?: () => void;
 }
 
 export function GraphToolbar({
@@ -20,6 +21,7 @@ export function GraphToolbar({
   onZoomOut,
   onFit,
   onReset,
+  onAddNode,
 }: GraphToolbarProps) {
   return (
     <div className="pointer-events-auto absolute left-4 top-4 z-20 flex flex-wrap items-center gap-2">
@@ -40,6 +42,16 @@ export function GraphToolbar({
           <RotateCcw className="size-4" />
         </IconButton>
       </div>
+      {onAddNode && (
+        <button
+          type="button"
+          onClick={onAddNode}
+          className="inline-flex items-center gap-1.5 rounded-2xl bg-ink px-3 py-2 text-xs font-semibold text-white shadow-[var(--shadow-glass)] hover:bg-ink-soft"
+        >
+          <Sparkles className="size-3.5" />
+          Add memory
+        </button>
+      )}
       <Badge tone="teal">{nodeCount} nodes</Badge>
       <Badge>{edgeCount} links</Badge>
     </div>

@@ -32,6 +32,7 @@ export interface ChatMessage {
     peaks: number[];
     playing?: boolean;
     progress?: number;
+    src?: string;
   };
 }
 
@@ -48,6 +49,7 @@ export interface FaceSignal {
   expression: "neutral" | "tense" | "sad" | "engaged" | "distressed";
   confidence: number;
   updatedAt: number;
+  model: "mediapipe" | "fallback";
 }
 
 export interface QuoteDraft {
