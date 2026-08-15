@@ -13,6 +13,10 @@ data "aws_ssm_parameter" "openrouter_api_key" {
   name = "/${var.environment}/openrouter/api-key"
 }
 
+data "aws_ssm_parameter" "resend_api_key" {
+  name = "/${var.environment}/resend/api-key"
+}
+
 resource "aws_lambda_function" "this" {
   function_name = var.function_name
   description   = "CBT Memory Agent API — CockroachDB x AWS Hackathon 2026"
@@ -35,6 +39,9 @@ resource "aws_lambda_function" "this" {
       CRDB_CONNECTION   = data.aws_ssm_parameter.crdb_url.value
       CCLOUD_API_KEY    = data.aws_ssm_parameter.ccloud_api_key.value
       OPENROUTER_API_KEY = data.aws_ssm_parameter.openrouter_api_key.value
+      RESEND_API_KEY    = data.aws_ssm_parameter.resend_api_key.value
+      EMAIL_FROM        = var.email_from
+      APP_URL           = var.app_url
       S3_BUCKET         = var.s3_bucket
       ALLOWED_ORIGIN    = var.allowed_origin
     }

@@ -18,5 +18,10 @@
 # app_pepper         = "generate-random-hex-string"
 # openrouter_daily_cap = 50
 
+# Resend (magic-link emails)
+# resend_api_key     = "re_..."
+# email_from         = "onboarding@resend.dev"
+# app_url            = "http://localhost:5173"
+
 # Budget alerts
 # alert_emails = ["your-email@example.com"]

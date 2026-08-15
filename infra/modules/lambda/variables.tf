@@ -44,3 +44,15 @@ variable "timeout" {
   type        = number
   default     = 29
 }
+
+variable "email_from" {
+  description = "From address for magic-link emails"
+  type        = string
+  default     = "onboarding@resend.dev"
+}
+
+variable "app_url" {
+  description = "Public app origin used in magic-link emails (e.g. http://localhost:5173)"
+  type        = string
+  default     = "http://localhost:5173"
+}

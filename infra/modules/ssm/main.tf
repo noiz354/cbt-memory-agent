@@ -66,6 +66,17 @@ resource "aws_ssm_parameter" "openrouter_api_key" {
   }
 }
 
+resource "aws_ssm_parameter" "resend_api_key" {
+  name        = "/${var.environment}/resend/api-key"
+  description = "Resend API key for magic-link emails"
+  type        = "SecureString"
+  value       = var.resend_api_key
+
+  tags = {
+    Name = "Resend API Key"
+  }
+}
+
 # Generate random pepper if not provided
 resource "random_password" "pepper" {
   length  = 32

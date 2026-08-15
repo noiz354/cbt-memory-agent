@@ -129,9 +129,11 @@ export async function handleRequestMagicLink(
     return json(500, { error: "Failed to store token" });
   }
 
-  const origin = process.env.ALLOWED_ORIGIN ?? process.env.APP_URL;
-  const devUrl = `${origin ?? "http://localhost:5173"}/auth/callback?token=${token}`;
-  const link = origin ? devUrl : `http://localhost:5173/auth/callback?token=${token}`;
+  // ALLOWED_ORIGIN is often "*" (CORS) — never use it as the link origin,
+  // or the email link becomes "*/auth/callback?...". Prefer APP_URL.
+  const appOrigin = (process.env.APP_URL ?? process.env.ALLOWED_ORIGIN ?? "").replace(/\/$/, "");
+  const origin = appOrigin && appOrigin !== "*" ? appOrigin : "http://localhost:5173";
+  const link = `${origin}/auth/callback?token=${token}`;
 
   const sent = await sendMagicLinkEmail(email, displayName, link);
 

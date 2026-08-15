@@ -67,6 +67,24 @@ variable "openrouter_api_key" {
   sensitive   = true
 }
 
+variable "resend_api_key" {
+  description = "Resend API key (re_...) for magic-link emails"
+  type        = string
+  sensitive   = true
+}
+
+variable "email_from" {
+  description = "From address for magic-link emails"
+  type        = string
+  default     = "onboarding@resend.dev"
+}
+
+variable "app_url" {
+  description = "Public app origin used in magic-link emails (e.g. http://localhost:5173)"
+  type        = string
+  default     = "http://localhost:5173"
+}
+
 variable "s3_bucket" {
   description = "S3 bucket for export bundles"
   type        = string

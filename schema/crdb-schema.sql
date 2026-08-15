@@ -31,6 +31,9 @@ CREATE TABLE IF NOT EXISTS users (
   INDEX users_auth_method_idx (auth_method)
 );
 
+-- Column added in Phase C — idempotent for clusters where users already exists
+ALTER TABLE users ADD COLUMN IF NOT EXISTS session_token STRING;
+
 -- ─────────────────────────────────────────────
 -- Auth tokens (magic-link, single-use, short TTL)
 -- ─────────────────────────────────────────────

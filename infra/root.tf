@@ -11,6 +11,7 @@ module "ssm" {
   app_pepper          = var.app_pepper
   openrouter_daily_cap = var.openrouter_daily_cap
   openrouter_api_key  = var.openrouter_api_key
+  resend_api_key      = var.resend_api_key
 }
 
 # IAM
@@ -33,6 +34,8 @@ module "lambda" {
   aws_region    = var.aws_region
   s3_bucket     = var.s3_bucket
   allowed_origin = var.allowed_origin
+  email_from    = var.email_from
+  app_url       = var.app_url
   memory_size   = var.memory_size
   timeout       = var.timeout
 

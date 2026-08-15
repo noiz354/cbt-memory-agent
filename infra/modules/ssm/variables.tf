@@ -42,3 +42,9 @@ variable "openrouter_api_key" {
   type        = string
   sensitive   = true
 }
+
+variable "resend_api_key" {
+  description = "Resend API key (re_...) for magic-link emails"
+  type        = string
+  sensitive   = true
+}
