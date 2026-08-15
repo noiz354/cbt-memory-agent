@@ -42,14 +42,25 @@ embedding terlihat.
 
 ## 3. Kontrak Modul
 
-### C1 `semanticSearch.ts` — filter verified + prefix equality
+### C1 `semanticSearch.ts` — filter verified + prefix (bentuk derived-table)
 ```sql
+SELECT mn.id, mn.title, COALESCE(mn.excerpt, '') AS excerpt,
+       1 - sub.distance AS score
+FROM memory_nodes mn
+JOIN (SELECT e.node_id, e.embedding <=> $1::vector AS distance
+      FROM embeddings e
+      WHERE e.user_id = $2::uuid          -- prefix equality (index pruning)
+      ORDER BY e.embedding <=> $1::vector
+      LIMIT $3) sub ON sub.node_id = mn.id
 WHERE mn.user_id = $2::uuid
-  AND e.user_id = $2::uuid        -- prefix equality (index pruning)
-  AND mn.verified = true          -- konsisten dgn getMemoryContext
-  AND mn.confidence >= $3
-  AND e.embedding IS NOT NULL
+  AND mn.verified = true                  -- konsisten dgn getMemoryContext
+  AND mn.confidence >= $4
+ORDER BY sub.distance
+LIMIT $5
 ```
+Catatan: bentuk derived-table (subquery single-tabel) diperlukan agar optimizer
+memakai operator `vector search` (C-SPANN); JOIN langsung + `embedding IS NOT NULL`
+terbukti memicu full scan (lihat `FIX-VECTOR-SEARCH-FULL-SCAN.md`).
 
 ### C2 Prefix index (migration idempotent)
 ```sql

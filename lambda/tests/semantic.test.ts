@@ -3,7 +3,7 @@
  *
  * Tidak menyentuh CockroachDB. Memakai mock CrdbClient untuk memverifikasi SQL
  * yang dikirim semanticSearch: hasil hanya node verified + prefix e.user_id
- * (index pruning) dan masih memakai cosine `<=>`.
+ * (index pruning), bentuk derived-table (vector search), dan cosine `<=>`.
  */
 
 import { describe, expect, it, vi } from "vitest";
@@ -47,6 +47,9 @@ describe("semantic search — verified filter + prefix", () => {
     expect(sql).toContain("e.user_id = $2::uuid");
     expect(sql).toContain("mn.user_id = $2::uuid");
     expect(sql).toContain("<=>");
+    expect(sql).toContain("JOIN (SELECT e.node_id, e.embedding <=> $1::vector AS distance");
+    expect(sql).toContain("ORDER BY sub.distance");
+    expect(sql).not.toContain("IS NOT NULL");
     expect(crdb.queries[0].params?.[0]).toBe(toVectorLiteral(EMBED));
   });
 
@@ -64,8 +67,9 @@ describe("semantic search — verified filter + prefix", () => {
   it("caps limit to 20 and honors minConfidence param", async () => {
     const crdb = crdbMock();
     await handleSemanticSearch({ q: "x", limit: "500", minConfidence: "0.8" }, crdb, llmMock(EMBED), "t", "d");
-    expect(crdb.queries[0].params?.[3]).toBe(20);
-    expect(crdb.queries[0].params?.[2]).toBe(0.8);
+    expect(crdb.queries[0].params?.[3]).toBe(0.8);
+    expect(crdb.queries[0].params?.[4]).toBe(20);
+    expect(crdb.queries[0].params?.[2]).toBe(80);
   });
 
   it("returns 400 when q is missing", async () => {

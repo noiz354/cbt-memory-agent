@@ -3,7 +3,7 @@
  *
  * Menggunakan Distributed Vector Indexing (pgvector) untuk cosine similarity.
  * 1. Embedding query via OpenRouter (arctic-embed, 1024-dim)
- * 2. SELECT memory_nodes JOIN embeddings ORDER BY embedding <=> $1::vector
+ * 2. Derived-table subquery (prefix user_id) → JOIN memory_nodes, filter verified
  * 3. Return { v:1, results:[{node, score, matchReason}] }
  */
 
@@ -49,17 +49,19 @@ export async function handleSemanticSearch(
 
     const rows = await crdb.query<SearchRow>(
       `SELECT mn.id, mn.title, COALESCE(mn.excerpt, '') AS excerpt,
-              1 - (e.embedding <=> $1::vector) AS score
-       FROM embeddings e
-       JOIN memory_nodes mn ON mn.id = e.node_id
+              1 - sub.distance AS score
+       FROM memory_nodes mn
+       JOIN (SELECT e.node_id, e.embedding <=> $1::vector AS distance
+             FROM embeddings e
+             WHERE e.user_id = $2::uuid
+             ORDER BY e.embedding <=> $1::vector
+             LIMIT $3) sub ON sub.node_id = mn.id
        WHERE mn.user_id = $2::uuid
-         AND e.user_id = $2::uuid
          AND mn.verified = true
-         AND mn.confidence >= $3
-         AND e.embedding IS NOT NULL
-       ORDER BY e.embedding <=> $1::vector
-       LIMIT $4`,
-      [toVectorLiteral(embedding), userId, minConfidence, limit],
+         AND mn.confidence >= $4
+       ORDER BY sub.distance
+       LIMIT $5`,
+      [toVectorLiteral(embedding), userId, candidateLimit(limit), minConfidence, limit],
     );
 
     if (rootCtx) {
@@ -104,6 +106,10 @@ async function getUserId(crdb: CrdbClient, token: string): Promise<string> {
     [token],
   );
   return row?.user_id ?? "";
+}
+
+function candidateLimit(limit: number): number {
+  return Math.min(Math.max(limit * 4, 16), 80);
 }
 
 function corsHeaders(): Record<string, string> {

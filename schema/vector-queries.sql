@@ -35,16 +35,21 @@ GROUP BY user_id
 ORDER BY embedding_rows DESC;
 
 -- 5. Rencana eksekusi query vector chat (pastikan operator `vector search`,
---    bukan full scan; jalankan setelah backfill + load test)
+--    bukan full scan; jalankan setelah backfill + load test).
+--    Bentuk derived-table: subquery single-tabel (index vector search) →
+--    JOIN memory_nodes dengan filter verified/confidence di WHERE luar.
 EXPLAIN ANALYZE
-SELECT DISTINCT ON (mn.id) mn.id, mn.title, COALESCE(mn.excerpt, '') AS excerpt,
-       COALESCE(mn.crisis_flag, false) AS crisisFlag
-FROM embeddings e
-JOIN memory_nodes mn ON mn.id = e.node_id
+SELECT mn.id, mn.title, COALESCE(mn.excerpt, '') AS excerpt,
+       COALESCE(mn.crisis_flag, false) AS crisisFlag,
+       1 - sub.distance AS score
+FROM memory_nodes mn
+JOIN (SELECT e.node_id, e.embedding <=> '[0.1,0.2,0.3,0.4]'::vector AS distance
+      FROM embeddings e
+      WHERE e.user_id = '00000000-0000-0000-0000-000000000000'::uuid
+      ORDER BY e.embedding <=> '[0.1,0.2,0.3,0.4]'::vector
+      LIMIT 16) sub ON sub.node_id = mn.id
 WHERE mn.user_id = '00000000-0000-0000-0000-000000000000'::uuid
-  AND e.user_id = '00000000-0000-0000-0000-000000000000'::uuid
   AND mn.verified = true
   AND mn.confidence >= 0.6
-  AND e.embedding IS NOT NULL
-ORDER BY mn.id, e.embedding <=> '[0.1,0.2,0.3,0.4]'::vector
+ORDER BY sub.distance
 LIMIT 8;
