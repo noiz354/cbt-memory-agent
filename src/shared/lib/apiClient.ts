@@ -342,6 +342,19 @@ export const apiClient = {
   metrics: (token: string, deviceId: string) =>
     api<Record<string, unknown>>("/metrics", { token, deviceId }),
 
+  /** POST /events — Track product/monetization events (FASE 4). */
+  trackEvent: (
+    events: { name: string; properties?: Record<string, unknown> | null; sessionId?: string; occurredAt?: string }[],
+    token: string,
+    deviceId: string,
+  ) =>
+    api<{ v: 1; inserted: number; rejected: number; rejectedNames?: string[] }>("/events", {
+      method: "POST",
+      token,
+      deviceId,
+      body: JSON.stringify({ events }),
+    }),
+
   /** GET /health — Health check. */
   health: () => api<HealthResponse>("/health"),
 };

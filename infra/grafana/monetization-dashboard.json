@@ -1,0 +1,357 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "description": "Monetization metrics — MRR/ARR, ARPU/ARPPU, LTV vs CAC, funnel checkout, churn. Datasource PostgreSQL uid=crdb-postgres (provision via scripts/grafana-provision.sh). SQL bersumber dari schema/monetization-queries.sql.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "links": [],
+  "panels": [
+    {
+      "datasource": { "type": "postgres", "uid": "crdb-postgres" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "fillOpacity": 60,
+            "lineWidth": 1,
+            "stacking": { "mode": "normal", "group": "A" }
+          },
+          "unit": "currencyUSD"
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "churned_mrr" }, "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "expansion_mrr" }, "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "new_mrr" }, "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }] }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "sum"] },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "crdb-postgres" },
+          "format": "time_series",
+          "group": [],
+          "rawSql": "SELECT\n  date_trunc('month', occurred_at)::date                                    AS \"time\",\n  COALESCE(SUM(COALESCE((event_properties->>'amount')::numeric, 0))\n           FILTER (WHERE event_name = 'payment_succeeded'), 0)::numeric     AS new_mrr,\n  COALESCE(SUM(COALESCE((event_properties->>'delta_amount')::numeric, 0))\n           FILTER (WHERE event_name = 'subscription_upgraded'\n                   AND COALESCE((event_properties->>'delta_amount')::numeric, 0) > 0), 0)::numeric AS expansion_mrr,\n  -COALESCE(SUM(COALESCE((event_properties->>'amount')::numeric, 0))\n            FILTER (WHERE event_name = 'subscription_cancelled'), 0)::numeric AS churned_mrr\nFROM user_events\nWHERE $__timeFilter(occurred_at)\n  AND event_name IN ('payment_succeeded', 'subscription_upgraded', 'subscription_cancelled')\nGROUP BY 1\nORDER BY 1;",
+          "refId": "A"
+        }
+      ],
+      "title": "MRR & ARR Growth — New / Expansion / Churned",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "crdb-postgres" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 5, "w": 12, "x": 0, "y": 8 },
+      "id": 2,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "crdb-postgres" },
+          "format": "table",
+          "group": [],
+          "rawSql": "SELECT\n  (COALESCE(SUM(amount) FILTER (WHERE billing_cycle = 'monthly'), 0)\n   + COALESCE(SUM(amount / 12) FILTER (WHERE billing_cycle = 'yearly'), 0))::numeric AS mrr,\n  (COALESCE(SUM(amount) FILTER (WHERE billing_cycle = 'monthly'), 0)\n   + COALESCE(SUM(amount / 12) FILTER (WHERE billing_cycle = 'yearly'), 0))::numeric * 12 AS arr\nFROM subscriptions\nWHERE status = 'active'\n  AND started_date <= $__timeTo()::timestamptz\n  AND (ended_date IS NULL OR ended_date > $__timeTo()::timestamptz);",
+          "refId": "A"
+        }
+      ],
+      "title": "MRR Level & ARR",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "crdb-postgres" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] },
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 5, "w": 12, "x": 12, "y": 8 },
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "crdb-postgres" },
+          "format": "table",
+          "group": [],
+          "rawSql": "SELECT\n  mrr / NULLIF(mau, 0) AS arpu,\n  mrr / NULLIF(paying_users, 0) AS arppu\nFROM (\n  SELECT\n    (SELECT COALESCE(SUM(CASE WHEN billing_cycle = 'yearly' THEN amount / 12 ELSE amount END), 0)::numeric\n     FROM subscriptions\n     WHERE status = 'active'\n       AND started_date <= $__timeTo()::timestamptz\n       AND (ended_date IS NULL OR ended_date > $__timeTo()::timestamptz)) AS mrr,\n    (SELECT COUNT(*) FROM (\n       SELECT id FROM users WHERE last_active >= $__timeFrom()::timestamptz AND last_active <= $__timeTo()::timestamptz\n       UNION\n       SELECT DISTINCT user_id FROM user_events WHERE $__timeFilter(occurred_at)\n     ) AS active_users) AS mau,\n    (SELECT COUNT(DISTINCT user_id)\n     FROM subscriptions\n     WHERE status = 'active'\n       AND started_date <= $__timeTo()::timestamptz\n       AND (ended_date IS NULL OR ended_date > $__timeTo()::timestamptz)) AS paying_users\n) AS calc;",
+          "refId": "A"
+        }
+      ],
+      "title": "ARPU & ARPPU",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "crdb-postgres" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [
+            {
+              "options": { "pattern": "ltv_cac_ratio" },
+              "type": "value",
+              "text": "LTV:CAC"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "green", "value": 2.5 }
+            ]
+          },
+          "unit": "currencyUSD"
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "ltv_cac_ratio" },
+            "properties": [
+              { "id": "unit", "value": "none" },
+              { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "yellow", "value": 1 }, { "color": "green", "value": 2.5 }] } }
+            ]
+          }
+        ]
+      },
+      "gridPos": { "h": 5, "w": 24, "x": 0, "y": 13 },
+      "id": 4,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "crdb-postgres" },
+          "format": "table",
+          "group": [],
+          "rawSql": "SELECT\n  (mrr / NULLIF(mau, 0) * ${gross_margin}) / NULLIF(${churn_rate}, 0) AS ltv\nFROM (\n  SELECT\n    (SELECT COALESCE(SUM(CASE WHEN billing_cycle = 'yearly' THEN amount / 12 ELSE amount END), 0)::numeric\n     FROM subscriptions WHERE status = 'active'\n       AND started_date <= $__timeTo()::timestamptz AND (ended_date IS NULL OR ended_date > $__timeTo()::timestamptz)) AS mrr,\n    (SELECT COUNT(*) FROM (\n       SELECT id FROM users WHERE last_active >= $__timeFrom()::timestamptz AND last_active <= $__timeTo()::timestamptz\n       UNION SELECT DISTINCT user_id FROM user_events WHERE $__timeFilter(occurred_at)\n     ) AS active_users) AS mau\n) AS calc;",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "postgres", "uid": "crdb-postgres" },
+          "format": "table",
+          "group": [],
+          "rawSql": "SELECT\n  COALESCE(SUM(cost), 0)::numeric\n    / NULLIF((SELECT COUNT(DISTINCT user_id) FROM subscriptions\n              WHERE status = 'active'\n                AND started_date >= $__timeFrom()::timestamptz\n                AND started_date <= $__timeTo()::timestamptz), 0) AS cac\nFROM marketing_ad_spend\nWHERE period_date >= $__timeFrom()::date AND period_date <= $__timeTo()::date;",
+          "refId": "B"
+        },
+        {
+          "datasource": { "type": "postgres", "uid": "crdb-postgres" },
+          "format": "table",
+          "group": [],
+          "rawSql": "SELECT\n  ((SELECT (mrr / NULLIF(mau, 0) * ${gross_margin}) / NULLIF(${churn_rate}, 0)\n    FROM (\n      SELECT\n        (SELECT COALESCE(SUM(CASE WHEN billing_cycle = 'yearly' THEN amount / 12 ELSE amount END), 0)::numeric\n         FROM subscriptions WHERE status = 'active'\n           AND started_date <= $__timeTo()::timestamptz AND (ended_date IS NULL OR ended_date > $__timeTo()::timestamptz)) AS mrr,\n        (SELECT COUNT(*) FROM (\n           SELECT id FROM users WHERE last_active >= $__timeFrom()::timestamptz AND last_active <= $__timeTo()::timestamptz\n           UNION SELECT DISTINCT user_id FROM user_events WHERE $__timeFilter(occurred_at)\n         ) AS active_users) AS mau\n    ) AS calc)\n   )::numeric\n   / NULLIF((SELECT COALESCE(SUM(cost), 0)::numeric\n             / NULLIF((SELECT COUNT(DISTINCT user_id) FROM subscriptions WHERE status = 'active'\n                       AND started_date >= $__timeFrom()::timestamptz AND started_date <= $__timeTo()::timestamptz), 0)\n             FROM marketing_ad_spend\n             WHERE period_date >= $__timeFrom()::date AND period_date <= $__timeTo()::date), 0) AS ltv_cac_ratio;",
+          "refId": "C"
+        }
+      ],
+      "title": "LTV vs CAC (target ~3:1)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "crdb-postgres" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 18 },
+      "id": 5,
+      "options": {
+        "displayMode": "basic",
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "crdb-postgres" },
+          "format": "table",
+          "group": [],
+          "rawSql": "SELECT\n  COUNT(*) FILTER (WHERE event_name = 'checkout_started')::int   AS started,\n  COUNT(*) FILTER (WHERE event_name = 'checkout_completed')::int  AS completed,\n  COUNT(*) FILTER (WHERE event_name = 'payment_succeeded')::int   AS succeeded,\n  COUNT(*) FILTER (WHERE event_name = 'payment_failed')::int      AS failed\nFROM user_events\nWHERE $__timeFilter(occurred_at)\n  AND event_name IN ('checkout_started', 'checkout_completed', 'payment_succeeded', 'payment_failed');",
+          "refId": "A"
+        }
+      ],
+      "title": "Checkout Funnel — Drop-off",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "crdb-postgres" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "max": 20,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 3 },
+              { "color": "red", "value": 8 }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 18 },
+      "id": 6,
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "crdb-postgres" },
+          "format": "table",
+          "group": [],
+          "rawSql": "SELECT\n  (COUNT(*) FILTER (WHERE event_name = 'payment_failed'))::numeric\n    / NULLIF(COUNT(*) FILTER (WHERE event_name IN ('payment_failed', 'payment_succeeded')), 0) * 100 AS failed_payment_rate\nFROM user_events\nWHERE $__timeFilter(occurred_at);",
+          "refId": "A"
+        }
+      ],
+      "title": "Failed Payment Rate",
+      "type": "gauge"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "crdb-postgres" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 5 },
+              { "color": "red", "value": 10 }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 5, "w": 12, "x": 0, "y": 24 },
+      "id": 7,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "crdb-postgres" },
+          "format": "table",
+          "group": [],
+          "rawSql": "WITH mrr_start AS (\n  SELECT COALESCE(SUM(CASE WHEN billing_cycle = 'yearly' THEN amount / 12 ELSE amount END), 0)::numeric AS mrr\n  FROM subscriptions\n  WHERE status = 'active'\n    AND started_date < $__timeFrom()::timestamptz\n    AND (ended_date IS NULL OR ended_date >= $__timeFrom()::timestamptz)\n)\nSELECT\n  COALESCE(SUM(lost), 0)::numeric / NULLIF((SELECT mrr FROM mrr_start), 0) * 100 AS revenue_churn_rate\nFROM (\n  SELECT COALESCE((event_properties->>'amount')::numeric, 0) AS lost\n  FROM user_events\n  WHERE event_name = 'subscription_cancelled' AND $__timeFilter(occurred_at)\n  UNION ALL\n  SELECT GREATEST(0, -COALESCE((event_properties->>'delta_amount')::numeric, 0))\n  FROM user_events\n  WHERE event_name = 'subscription_upgraded' AND $__timeFilter(occurred_at)\n    AND COALESCE((event_properties->>'delta_amount')::numeric, 0) < 0\n) AS churn_deltas;",
+          "refId": "A"
+        }
+      ],
+      "title": "Revenue Churn Rate (% MRR hilang)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "crdb-postgres" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 40 },
+              { "color": "red", "value": 60 }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 5, "w": 12, "x": 12, "y": 24 },
+      "id": 8,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "crdb-postgres" },
+          "format": "table",
+          "group": [],
+          "rawSql": "SELECT\n  (COUNT(*) FILTER (WHERE event_name = 'checkout_started')\n   - COUNT(*) FILTER (WHERE event_name = 'checkout_completed'))::numeric\n    / NULLIF(COUNT(*) FILTER (WHERE event_name = 'checkout_started'), 0) * 100 AS checkout_abandonment_rate\nFROM user_events\nWHERE $__timeFilter(occurred_at);",
+          "refId": "A"
+        }
+      ],
+      "title": "Checkout Abandonment Rate",
+      "type": "stat"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 40,
+  "tags": ["monetization", "fase4"],
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": false, "text": "0.7", "value": "0.7" },
+        "hide": 0,
+        "label": "Gross margin",
+        "name": "gross_margin",
+        "query": "0.7",
+        "skipUrlSync": false,
+        "type": "constant"
+      },
+      {
+        "current": { "selected": false, "text": "0.05", "value": "0.05" },
+        "hide": 0,
+        "label": "Churn rate (user)",
+        "name": "churn_rate",
+        "query": "0.05",
+        "skipUrlSync": false,
+        "type": "constant"
+      }
+    ]
+  },
+  "time": { "from": "now-6M", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Monetization — MRR/ARR · ARPU/ARPPU · LTV:CAC · Funnel · Churn",
+  "uid": "monetization",
+  "version": 1
+}
