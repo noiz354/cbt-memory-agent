@@ -115,7 +115,10 @@ CREATE TABLE IF NOT EXISTS embeddings (
 -- Vector index untuk semantic search (C-SPANN, cosine)
 -- v25.2+ mendukung CREATE VECTOR INDEX; cosine di-accelerate sejak v25.4 GA.
 -- Opclass vector_cosine_ops dipilih agar cocok dengan query `<=>` (semanticSearch.ts).
-CREATE VECTOR INDEX IF NOT EXISTS embeddings_vector_idx ON embeddings (embedding vector_cosine_ops);
+-- Prefix column user_id: satu k-means tree per user → semua query vector wajib
+-- equality-constraint `e.user_id = $n::uuid` (index pruning aktif).
+CREATE VECTOR INDEX IF NOT EXISTS embeddings_vector_idx
+  ON embeddings (user_id, embedding vector_cosine_ops);
 
 -- ─────────────────────────────────────────────
 -- Sessions (CBT therapy sessions)

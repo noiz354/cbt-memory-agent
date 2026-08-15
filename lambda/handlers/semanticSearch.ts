@@ -11,6 +11,8 @@ import { CrdbClient } from "../lib/crdb";
 import { OpenRouterClient } from "../lib/openrouter";
 import { toVectorLiteral } from "../lib/vectors";
 import { logger } from "../lib/logger";
+import { withSpan } from "../lib/telemetry";
+import { Context } from "@opentelemetry/api";
 
 interface SearchRow {
   id: string;
@@ -25,6 +27,7 @@ export async function handleSemanticSearch(
   llm: OpenRouterClient,
   token: string,
   deviceId: string,
+  rootCtx?: Context,
 ) {
   const q = qs.q?.trim() ?? "";
   const limit = Math.min(Number(qs.limit ?? 5) || 5, 20);
@@ -40,7 +43,9 @@ export async function handleSemanticSearch(
 
   try {
     const userId = await getUserId(crdb, token);
+    const embedStartedAt = Date.now();
     const embedding = await llm.generateEmbedding(q);
+    const embeddingMs = Date.now() - embedStartedAt;
 
     const rows = await crdb.query<SearchRow>(
       `SELECT mn.id, mn.title, COALESCE(mn.excerpt, '') AS excerpt,
@@ -48,12 +53,26 @@ export async function handleSemanticSearch(
        FROM embeddings e
        JOIN memory_nodes mn ON mn.id = e.node_id
        WHERE mn.user_id = $2::uuid
+         AND e.user_id = $2::uuid
+         AND mn.verified = true
          AND mn.confidence >= $3
          AND e.embedding IS NOT NULL
        ORDER BY e.embedding <=> $1::vector
        LIMIT $4`,
       [toVectorLiteral(embedding), userId, minConfidence, limit],
     );
+
+    if (rootCtx) {
+      withSpan(
+        "memory.semantic_search",
+        rootCtx,
+        async (span) => {
+          span.setAttribute("memory.matched", rows.length);
+          span.setAttribute("memory.embedding_ms", embeddingMs);
+        },
+        { attributes: { "memory.matched": rows.length } },
+      );
+    }
 
     return {
       statusCode: 200,

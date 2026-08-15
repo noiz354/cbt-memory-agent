@@ -16,6 +16,8 @@ import { CrdbClient } from "../lib/crdb";
 import { OpenRouterClient } from "../lib/openrouter";
 import { withSpan } from "../lib/telemetry";
 import { logger } from "../lib/logger";
+import { reciprocalRankFusion } from "../lib/retrieval";
+import { toVectorLiteral } from "../lib/vectors";
 
 const chatTurnSchema = z.object({
   v: z.literal(1),
@@ -77,14 +79,17 @@ export async function handleChatTurn(
     const userId = await upsertUser(crdb, token);
 
     // 3. Memory context (span semantik bisnis; span db.query dibuat oleh wrapper crdb)
-    const memories = await withSpan(
+    const { rows: memories, mode, embeddingMs, failed } = await withSpan(
       "agent.memory.retrieve",
       rootCtx,
       async (span) => {
-        const rows = await getMemoryContext(crdb, userId, body.memoryIds ?? []);
+        const res = await getMemoryContext(crdb, llm, userId, body.memoryIds ?? [], body.userMessage);
         span.setAttribute("memory.ids_requested", body.memoryIds?.length ?? 0);
-        span.setAttribute("memory.results", rows.length);
-        return rows;
+        span.setAttribute("memory.results", res.rows.length);
+        span.setAttribute("memory.mode", res.mode);
+        if (res.embeddingMs !== undefined) span.setAttribute("memory.embedding_ms", res.embeddingMs);
+        if (res.failed) span.setAttribute("memory.failed", true);
+        return res;
       },
       { attributes: { "memory.ids_requested": body.memoryIds?.length ?? 0 } },
     );
@@ -189,12 +194,30 @@ async function upsertUser(crdb: CrdbClient, token: string): Promise<string> {
   return userIdVal;
 }
 
-async function getMemoryContext(
+export interface MemoryRetrievalResult {
+  rows: MemoryContext[];
+  mode: "heuristic" | "hybrid";
+  embeddingMs?: number;
+  failed?: boolean;
+}
+
+/**
+ * Hybrid memory retrieval (Gap 1+2).
+ *
+ * - memoryIds eksplisit → query by id (heuristik murni, tanpa embedding).
+ * - tanpa memoryIds → embed userMessage + cosine query (filter verified/confidence,
+ *   prefix user_id, dedup-by-node untuk chunking), lalu fuse dgn hasil heuristik
+ *   via Reciprocal Rank Fusion (k=60, top 8).
+ * - embedding gagal → fallback heuristik murni (chat tetap jalan), failed=true.
+ */
+export async function getMemoryContext(
   crdb: CrdbClient,
+  llm: OpenRouterClient,
   userId: string,
   memoryIds: string[],
-): Promise<MemoryContext[]> {
-  const rows = await crdb.query<MemoryContext>(
+  userMessage: string,
+): Promise<MemoryRetrievalResult> {
+  const heuristicRows = await crdb.query<MemoryContext>(
     `SELECT id, title, COALESCE(excerpt, '') AS excerpt, COALESCE(crisis_flag, false) AS crisisFlag
      FROM memory_nodes
      WHERE user_id = $1::uuid
@@ -205,7 +228,43 @@ async function getMemoryContext(
      LIMIT 8`,
     [userId, memoryIds],
   );
-  return rows;
+
+  if (memoryIds.length > 0) {
+    return { rows: heuristicRows, mode: "heuristic" };
+  }
+
+  const startedAt = Date.now();
+  let embedding: number[];
+  try {
+    embedding = await llm.generateEmbedding(userMessage);
+  } catch (err) {
+    logger.warn("chat.embedding_failed", "Query embedding failed — heuristic fallback", {
+      err: err instanceof Error ? err.message : String(err),
+    });
+    return { rows: heuristicRows, mode: "heuristic", embeddingMs: Date.now() - startedAt, failed: true };
+  }
+  const embeddingMs = Date.now() - startedAt;
+
+  const vectorRows = await crdb.query<MemoryContext>(
+    `SELECT DISTINCT ON (mn.id) mn.id, mn.title, COALESCE(mn.excerpt, '') AS excerpt,
+            COALESCE(mn.crisis_flag, false) AS crisisFlag
+     FROM embeddings e
+     JOIN memory_nodes mn ON mn.id = e.node_id
+     WHERE mn.user_id = $2::uuid
+       AND e.user_id = $2::uuid
+       AND mn.verified = true
+       AND mn.confidence >= 0.6
+       AND e.embedding IS NOT NULL
+     ORDER BY mn.id, e.embedding <=> $1::vector
+     LIMIT 8`,
+    [toVectorLiteral(embedding), userId],
+  );
+
+  return {
+    rows: reciprocalRankFusion<MemoryContext>([heuristicRows, vectorRows], 60, 8),
+    mode: "hybrid",
+    embeddingMs,
+  };
 }
 
 async function upsertSession(crdb: CrdbClient, userId: string, sessionId: string): Promise<void> {

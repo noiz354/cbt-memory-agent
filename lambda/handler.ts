@@ -192,7 +192,7 @@ async function route(
   }
   if (method === "GET" && path === "/api/v1/memory/semantic") {
     const qs = queryStringParameters;
-    return await handleSemanticSearch(qs, crdb, llm, token, deviceId);
+    return await handleSemanticSearch(qs, crdb, llm, token, deviceId, rootCtx);
   }
 
   // Sessions

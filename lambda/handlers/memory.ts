@@ -10,7 +10,7 @@
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
 import { CrdbClient } from "../lib/crdb";
 import { OpenRouterClient } from "../lib/openrouter";
-import { EMBED_TEXT_SOURCE, embeddingText, toVectorLiteral } from "../lib/vectors";
+import { buildEmbeddingChunks, toVectorLiteral } from "../lib/vectors";
 import { logger } from "../lib/logger";
 
 interface MemoryNodeRow {
@@ -264,31 +264,35 @@ async function getUserId(crdb: CrdbClient, token: string): Promise<string> {
  * tabel `embeddings`. Best-effort: jika embedding gagal (mis. OpenRouter down),
  * error dicatat tapi TIDAK dilempar — memory node tetap tersimpan.
  *
- * Selalu hapus embedding lama node dulu (node bisa di-upsert ulang), lalu insert
- * versi baru, sehingga `embeddings` tidak menumpuk versi usang per node.
+ * Teks di-embed = title + tags + excerpt (buildEmbeddingChunks); excerpt panjang
+ * dipecah menjadi beberapa baris embeddings (text_source `chunk-N`). Selalu hapus
+ * embedding lama node dulu (node bisa di-upsert ulang), lalu insert versi baru,
+ * sehingga `embeddings` tidak menumpuk versi usang per node. Insert per-chunk
+ * (bukan batch) sesuai best practice C-SPANN.
  */
 async function writeNodeEmbedding(
   crdb: CrdbClient,
   llm: OpenRouterClient,
   userId: string,
-  node: { id: string; title: string; excerpt?: string | null },
+  node: { id: string; title: string; excerpt?: string | null; tags?: string[] | null },
 ): Promise<void> {
   try {
-    const text = embeddingText(node).slice(0, 8000);
-    if (!text) return;
-
-    const embedding = await llm.generateEmbedding(text);
-    const literal = toVectorLiteral(embedding);
+    const chunks = buildEmbeddingChunks(node);
+    if (chunks.length === 0) return;
 
     await crdb.execute(
       `DELETE FROM embeddings WHERE user_id = $1::uuid AND node_id = $2`,
       [userId, node.id],
     );
-    await crdb.execute(
-      `INSERT INTO embeddings (user_id, node_id, embedding, text_source)
-       VALUES ($1::uuid, $2, $3, $4)`,
-      [userId, node.id, literal, EMBED_TEXT_SOURCE],
-    );
+    for (const chunk of chunks) {
+      const embedding = await llm.generateEmbedding(chunk.text.slice(0, 8000));
+      const literal = toVectorLiteral(embedding);
+      await crdb.execute(
+        `INSERT INTO embeddings (user_id, node_id, embedding, text_source)
+         VALUES ($1::uuid, $2, $3, $4)`,
+        [userId, node.id, literal, chunk.textSource],
+      );
+    }
   } catch (err) {
     logger.warn("memory.embedding_failed", "Embedding write skipped (best-effort)", {
       err: err instanceof Error ? err.message : String(err),

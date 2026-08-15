@@ -107,6 +107,38 @@ describe("vector writer — handleUpsertMemory", () => {
     expect(res.statusCode).toBe(400);
     expect(llm.generateEmbedding).not.toHaveBeenCalled();
   });
+
+  it("upsert node with tags embeds title — tags — excerpt (Gap 6)", async () => {
+    const crdb = crdbMock();
+    const llm = llmMock(new Array(1024).fill(0.5));
+    await handleUpsertMemory(
+      NODE_BODY({ id: "n4", title: "Panic", tags: ["anxiety", "noise"], excerpt: "loud noise" }),
+      crdb,
+      llm,
+      "tok-1",
+      "dev-1",
+    );
+    expect(llm.generateEmbedding).toHaveBeenCalledWith("Panic — anxiety,noise — loud noise");
+  });
+
+  it("upsert node with long excerpt writes one embedding per chunk (chunk-N)", async () => {
+    const crdb = crdbMock();
+    const llm = llmMock(new Array(1024).fill(0.5));
+    const longExcerpt = "y".repeat(6200);
+    await handleUpsertMemory(
+      NODE_BODY({ id: "n5", title: "Long memory", excerpt: longExcerpt }),
+      crdb,
+      llm,
+      "tok-1",
+      "dev-1",
+    );
+    const inserts = crdb.executes.filter((c) => c.sql.includes("INSERT INTO embeddings"));
+    expect(inserts.length).toBeGreaterThanOrEqual(3);
+    expect(inserts[0].params?.[3]).toBe("chunk-0");
+    expect(inserts[1].params?.[3]).toBe("chunk-1");
+    const deletes = crdb.executes.filter((c) => c.sql.includes("DELETE FROM embeddings"));
+    expect(deletes).toHaveLength(1);
+  });
 });
 
 describe("vectors lib", () => {
