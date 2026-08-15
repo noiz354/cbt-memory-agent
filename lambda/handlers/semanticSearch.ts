@@ -9,6 +9,7 @@
 
 import { CrdbClient } from "../lib/crdb";
 import { OpenRouterClient } from "../lib/openrouter";
+import { logger } from "../lib/logger";
 
 interface SearchRow {
   id: string;
@@ -66,7 +67,9 @@ export async function handleSemanticSearch(
       }),
     };
   } catch (err) {
-    console.error("semanticSearch error:", err);
+    logger.error("semantic.search_failed", "semanticSearch error", {
+      err: err instanceof Error ? err.message : String(err),
+    });
     return {
       statusCode: 500,
       headers: corsHeaders(),

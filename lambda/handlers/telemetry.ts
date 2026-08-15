@@ -14,6 +14,8 @@
  */
 
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
+import { randomInt } from "node:crypto";
+import { logger } from "../lib/logger";
 
 export async function handleTelemetryRelay(
   event: APIGatewayProxyEvent,
@@ -22,7 +24,7 @@ export async function handleTelemetryRelay(
   const authHeader = process.env.OTEL_EXPORTER_OTLP_HEADERS;
 
   if (!endpoint || !authHeader) {
-    console.error("[telemetry] OTLP endpoint/auth not configured");
+    logger.error("telemetry.not_configured", "OTLP endpoint/auth not configured");
     return {
       statusCode: 502,
       headers: relayCors(),
@@ -42,6 +44,23 @@ export async function handleTelemetryRelay(
     };
   }
 
+  // Head sampling di relay (pengganti Collector): browser mengirim 100% span,
+  // relay memutuskan apakah batch diteruskan. Ratio dari env, default 1.0.
+  const sampleRatio = Number(process.env.OTEL_RELAY_SAMPLING_RATIO ?? 1.0);
+  if (sampleRatio < 1) {
+    const keep = sampleRatio > 0 && randomInt(0, 10000) < sampleRatio * 10000;
+    if (!keep) {
+      logger.info("telemetry.sampled_out", "OTLP batch sampled out by relay", {
+        ratio: sampleRatio,
+      });
+      return {
+        statusCode: 204,
+        headers: relayCors(),
+        body: "",
+      };
+    }
+  }
+
   const payload = isBase64 ? Buffer.from(body, "base64") : Buffer.from(body, "utf8");
   const contentType = event.headers?.["Content-Type"] ?? event.headers?.["content-type"] ?? "application/x-protobuf";
 
@@ -57,7 +76,7 @@ export async function handleTelemetryRelay(
 
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      console.error(`[telemetry] upstream ${res.status} ${res.statusText}: ${text.slice(0, 200)}`);
+      logger.error("telemetry.upstream_failed", "telemetry upstream error", { status: res.status, statusText: res.statusText, detail: text.slice(0, 200) });
       return {
         statusCode: 502,
         headers: relayCors(),
@@ -65,14 +84,14 @@ export async function handleTelemetryRelay(
       };
     }
 
-    console.log("[telemetry] OTLP export 200/OK");
+    logger.info("telemetry.export_ok", "OTLP export 200/OK");
     return {
       statusCode: 200,
       headers: relayCors(),
       body: "",
     };
   } catch (err) {
-    console.error("[telemetry] relay error:", err);
+    logger.error("telemetry.relay_failed", "telemetry relay error", { err: err instanceof Error ? err.message : String(err) });
     return {
       statusCode: 502,
       headers: relayCors(),

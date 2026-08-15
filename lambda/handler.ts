@@ -14,11 +14,24 @@
 
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
 import { SpanStatusCode, Context } from "@opentelemetry/api";
+import {
+  ATTR_HTTP_REQUEST_METHOD,
+  ATTR_HTTP_ROUTE,
+  ATTR_HTTP_RESPONSE_STATUS_CODE,
+} from "@opentelemetry/semantic-conventions";
 import { CrdbClient } from "./lib/crdb";
 import { OpenRouterClient } from "./lib/openrouter";
 import { S3ClientService } from "./lib/s3";
 import { validateAuth } from "./middleware/auth";
-import { extractTraceContext, flushTelemetry, setupTelemetry, startSpan } from "./lib/telemetry";
+import {
+  extractTraceContext,
+  flushTelemetry,
+  normalizeRoute,
+  recordHttpRequest,
+  setupTelemetry,
+  startSpan,
+} from "./lib/telemetry";
+import { logger } from "./lib/logger";
 import { handleChatTurn } from "./handlers/chatTurn";
 import { handleListMemory, handleUpsertMemory, handleDeleteMemory, handleDeleteMemoryEdge } from "./handlers/memory";
 import { handleSemanticSearch } from "./handlers/semanticSearch";
@@ -61,11 +74,12 @@ export async function handler(
   const deviceId = headers["x-device-id"] ?? "";
   const queryStringParameters =
     event.queryStringParameters ?? parseQueryString(event.rawQueryString ?? "");
+  const startedAt = Date.now();
   const parentCtx = extractTraceContext(headers);
   const [rootSpan, rootCtx] = startSpan(`${method} ${path || "/"}`, parentCtx, {
     attributes: {
-      "http.method": method,
-      "http.route": path || "/",
+      [ATTR_HTTP_REQUEST_METHOD]: method,
+      [ATTR_HTTP_ROUTE]: path || "/",
     },
   });
 
@@ -80,20 +94,21 @@ export async function handler(
       rootCtx,
     });
 
-    rootSpan.setAttribute("http.status_code", result.statusCode);
-    return attachTraceId(result, rootSpan);
+    return finalizeResponse(result, rootSpan, startedAt, method, path);
   } catch (err) {
-    console.error("Unhandled API error:", err);
+    logger.error("api.unhandled", "Unhandled API error", { err: err instanceof Error ? err.message : String(err) });
     rootSpan.recordException(err instanceof Error ? err : new Error(String(err)));
     rootSpan.setStatus({ code: SpanStatusCode.ERROR });
-    rootSpan.setAttribute("http.status_code", 500);
-    return attachTraceId(
+    return finalizeResponse(
       {
         statusCode: 500,
         headers: corsHeaders(),
         body: JSON.stringify({ error: "Internal server error" }),
       },
       rootSpan,
+      startedAt,
+      method,
+      path,
     );
   } finally {
     rootSpan.end();
@@ -209,12 +224,25 @@ async function route(
   return notFound();
 }
 
-/** Suntikkan X-Trace-Id ke header response (tanpa mengubah CORS headers). */
-function attachTraceId(result: APIGatewayProxyResult, span: { spanContext(): { traceId: string } }): APIGatewayProxyResult {
+/**
+ * Suntikkan X-Trace-Id ke header response (tanpa mengubah CORS headers), catat
+ * status ke root span memakai semconv stable, dan rekam RED metric HTTP.
+ * Dipakai untuk SEMUA response (sukses, 401, 404, 500) — menjamin contract
+ * trace di tiap endpoint.
+ */
+function finalizeResponse(
+  result: APIGatewayProxyResult,
+  span: { spanContext(): { traceId: string }; setAttribute(key: string, value: number): void },
+  startedAt: number,
+  method: string,
+  path: string,
+): APIGatewayProxyResult {
   const traceId = span.spanContext().traceId;
   if (traceId) {
     result.headers = { ...(result.headers ?? {}), "X-Trace-Id": traceId };
   }
+  span.setAttribute(ATTR_HTTP_RESPONSE_STATUS_CODE, result.statusCode);
+  recordHttpRequest(method, normalizeRoute(path || "/"), result.statusCode, Date.now() - startedAt);
   return result;
 }
 
@@ -223,7 +251,7 @@ function corsHeaders(): Record<string, string> {
   if (!origin) {
     // Fail-loud: never silently deploy with wildcard CORS. If ALLOWED_ORIGIN is
     // missing we still respond (hackathon default) but log so it can't be missed.
-    console.warn("[cors] ALLOWED_ORIGIN is not set — falling back to '*' (set it in production)");
+    logger.warn("cors.missing_origin", "ALLOWED_ORIGIN is not set — falling back to '*' (set it in production)");
   }
   return {
     "Access-Control-Allow-Origin": origin ?? "*",

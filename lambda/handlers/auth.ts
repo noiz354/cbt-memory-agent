@@ -15,6 +15,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { APIGatewayProxyEvent } from "aws-lambda";
 import { CrdbClient } from "../lib/crdb";
+import { logger } from "../lib/logger";
 
 const MAGIC_LINK_TTL_MS = 10 * 60 * 1000;
 
@@ -125,7 +126,7 @@ export async function handleRequestMagicLink(
       [email, tokenHash, expiresAt],
     );
   } catch (err) {
-    console.error("auth/magic-link insert error:", err);
+    logger.error("auth.magic_link_insert_failed", "auth/magic-link insert error", { err: err instanceof Error ? err.message : String(err) });
     return json(500, { error: "Failed to store token" });
   }
 
@@ -143,7 +144,7 @@ export async function handleRequestMagicLink(
     if (!process.env.RESEND_API_KEY) {
       return json(200, { ok: true, sent: false, devUrl: link });
     }
-    console.warn("Resend send failed:", sent.error);
+    logger.warn("auth.resend_send_failed", "Resend send failed", { error: sent.error });
     return json(502, { ok: false, sent: false, error: sent.error });
   }
 
@@ -209,7 +210,7 @@ export async function handleConsumeMagicLink(
 
     return json(200, { ok: true, userId: userId?.user_id ?? "", sessionToken, email });
   } catch (err) {
-    console.error("auth/callback error:", err);
+    logger.error("auth.callback_failed", "auth/callback error", { err: err instanceof Error ? err.message : String(err) });
     return json(500, { error: "Failed to verify token" });
   }
 }

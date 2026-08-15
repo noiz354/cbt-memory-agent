@@ -15,6 +15,7 @@ import { Context } from "@opentelemetry/api";
 import { CrdbClient } from "../lib/crdb";
 import { OpenRouterClient } from "../lib/openrouter";
 import { withSpan } from "../lib/telemetry";
+import { logger } from "../lib/logger";
 
 const chatTurnSchema = z.object({
   v: z.literal(1),
@@ -75,19 +76,17 @@ export async function handleChatTurn(
     // 2. Upsert user — deterministic UUID dari token
     const userId = await upsertUser(crdb, token);
 
-    // 3. Memory context
+    // 3. Memory context (span semantik bisnis; span db.query dibuat oleh wrapper crdb)
     const memories = await withSpan(
       "agent.memory.retrieve",
       rootCtx,
       async (span) => {
         const rows = await getMemoryContext(crdb, userId, body.memoryIds ?? []);
-        span.setAttribute("db.system", "cockroachdb");
-        span.setAttribute("db.operation", "SELECT");
-        span.setAttribute("db.memory_ids", body.memoryIds?.length ?? 0);
-        span.setAttribute("db.results", rows.length);
+        span.setAttribute("memory.ids_requested", body.memoryIds?.length ?? 0);
+        span.setAttribute("memory.results", rows.length);
         return rows;
       },
-      { attributes: { "db.system": "cockroachdb", "db.operation": "SELECT" } },
+      { attributes: { "memory.ids_requested": body.memoryIds?.length ?? 0 } },
     );
 
     // 4. Build prompt
@@ -116,7 +115,7 @@ export async function handleChatTurn(
       "llm.openrouter",
       rootCtx,
       async (span) => {
-        span.setAttribute("gen_ai.provider", "openrouter");
+        span.setAttribute("gen_ai.operation.name", "chat");
         span.setAttribute("gen_ai.request.model", "openrouter/free");
         span.setAttribute("gen_ai.request.max_tokens", 1024);
 
@@ -134,7 +133,7 @@ export async function handleChatTurn(
         span.setAttribute("gen_ai.usage.output_tokens", tokens);
         return { content, tokens };
       },
-      { attributes: { "gen_ai.provider": "openrouter", "gen_ai.request.model": "openrouter/free" } },
+      { attributes: { "gen_ai.operation.name": "chat", "gen_ai.request.model": "openrouter/free" } },
     );
     fullContent = llmResult.content;
     tokensUsed = llmResult.tokens;
@@ -143,12 +142,10 @@ export async function handleChatTurn(
       fullContent = "Maaf, saya tidak bisa memproses pesan itu saat ini. Coba lagi ya.";
     }
 
-    // 6. Save chat_turns
-    await withSpan("db.persist", rootCtx, async () => {
-      await upsertSession(crdb, userId, body.sessionId);
-      await saveChatTurn(crdb, userId, body.sessionId, "user", body.userMessage, 0, body.memoryIds ?? []);
-      await saveChatTurn(crdb, userId, body.sessionId, "assistant", fullContent, tokensUsed, []);
-    }, { attributes: { "db.system": "cockroachdb", "db.operation": "INSERT" } });
+    // 6. Save chat_turns (span db.query dibuat otomatis oleh wrapper crdb)
+    await upsertSession(crdb, userId, body.sessionId);
+    await saveChatTurn(crdb, userId, body.sessionId, "user", body.userMessage, 0, body.memoryIds ?? []);
+    await saveChatTurn(crdb, userId, body.sessionId, "assistant", fullContent, tokensUsed, []);
 
     const sse =
       fullContent
@@ -162,7 +159,9 @@ export async function handleChatTurn(
       body: sse,
     };
   } catch (err) {
-    console.error("chatTurn error:", err);
+    logger.error("chat.turn_failed", "chatTurn error", {
+      err: err instanceof Error ? err.message : String(err),
+    });
     return {
       statusCode: 200,
       headers: cors,

@@ -13,6 +13,10 @@
  *   - extractTraceContext(headers): baca header `traceparent` dari event Lambda
  *   - startSpan(name, parent): buat child span dari parent context
  *   - flushTelemetry(): forceFlush semua provider sebelum lambda return
+ *
+ * Governance (dari security-and-hardening skill):
+ *   - Semua attribute melewati sanitizer: denylist key sensitif + redaksi UUID.
+ *   - Maksimal ~8 primitive attributes per span; tidak ada complex JSON payload.
  */
 
 import {
@@ -26,6 +30,7 @@ import {
   Context,
 } from "@opentelemetry/api";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
+import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
 import { OTLPMetricExporter } from "@opentelemetry/exporter-metrics-otlp-http";
 import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
@@ -34,7 +39,19 @@ import { PeriodicExportingMetricReader, MeterProvider } from "@opentelemetry/sdk
 import { LoggerProvider, BatchLogRecordProcessor } from "@opentelemetry/sdk-logs";
 import { BatchSpanProcessor, TracerProvider } from "@opentelemetry/sdk-trace";
 import { SeverityNumber } from "@opentelemetry/api-logs";
-import { SEMRESATTRS_SERVICE_NAME, SEMRESATTRS_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
+import {
+  SEMRESATTRS_SERVICE_NAME,
+  SEMRESATTRS_SERVICE_VERSION,
+  ATTR_HTTP_REQUEST_METHOD,
+  ATTR_HTTP_ROUTE,
+  ATTR_DB_SYSTEM_NAME,
+  ATTR_DB_OPERATION_NAME,
+} from "@opentelemetry/semantic-conventions";
+import {
+  ATTR_GEN_AI_SYSTEM,
+  ATTR_GEN_AI_OPERATION_NAME,
+  ATTR_RPC_SYSTEM,
+} from "@opentelemetry/semantic-conventions/incubating";
 
 const SERVICE_NAME = process.env.OTEL_SERVICE_NAME ?? "cbt-memory-agent-backend";
 const SERVICE_VERSION = "0.1.0";
@@ -70,6 +87,10 @@ export function setupTelemetry(): void {
   });
 
   try {
+    // Context manager penting: tanpa ini `context.active()` di async callbacks
+    // selalu ROOT_CONTEXT → logger tidak pernah dapat trace_id/span_id.
+    context.setGlobalContextManager(new AsyncLocalStorageContextManager());
+
     // Traces
     tracerProvider = new TracerProvider({
       resource,
@@ -128,6 +149,35 @@ export interface ChildSpanOptions {
   attributes?: Record<string, string | number | boolean | undefined>;
 }
 
+/** Kunci attribute yang TIDAK BOLEH pernah masuk ke span (PII/secret). */
+const DENYLIST_KEYS = /(^|\.)(authorization|password|passwd|secret|jwt|access_token|refresh_token|session_token|email|phone|phone_number|x-device-id)(\.|$)/i;
+
+/** Redaksi UUID (v4/canonical) di nilai attribute — mencegah identitas bocor. */
+const UUID_PATTERN = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
+
+/**
+ * Sanitizer attribute span (governance layer).
+ * - Kunci sensitif → dihapus total (tidak pernah masuk ke eksport).
+ * - Nilai mengandung UUID → di-redaksi jadi `<redacted>`.
+ */
+export function sanitizeAttributes(
+  attributes: Record<string, string | number | boolean | undefined>,
+): Record<string, string | number | boolean> {
+  const out: Record<string, string | number | boolean> = {};
+  for (const [key, value] of Object.entries(attributes)) {
+    if (value === undefined) continue;
+    if (DENYLIST_KEYS.test(key)) continue;
+    if (typeof value === "string") {
+      const redacted = value.replace(UUID_PATTERN, "<redacted>");
+      if (redacted.length > 512) continue;
+      out[key] = redacted;
+      continue;
+    }
+    out[key] = value;
+  }
+  return out;
+}
+
 /** Mulai span baru sebagai child dari parent context. Return [span, ctx]. */
 export function startSpan(
   name: string,
@@ -135,7 +185,11 @@ export function startSpan(
   opts: ChildSpanOptions = {},
 ): [Span, Context] {
   const tracer = trace.getTracer(SERVICE_NAME, SERVICE_VERSION);
-  const span = tracer.startSpan(name, { attributes: opts.attributes ?? {} }, parentCtx);
+  const span = tracer.startSpan(
+    name,
+    { attributes: sanitizeAttributes(opts.attributes ?? {}) },
+    parentCtx,
+  );
   const ctx = trace.setSpan(parentCtx, span);
   return [span, ctx];
 }
@@ -168,7 +222,12 @@ export function emitLog(
 ): void {
   if (!logger) return;
   try {
-    logger.emit({ body, severityNumber, attributes, context: ctx });
+    logger.emit({
+      body,
+      severityNumber,
+      attributes: sanitizeAttributes(attributes),
+      context: ctx,
+    });
   } catch (err) {
     console.error("[otel] emitLog failed:", err);
   }
@@ -186,4 +245,115 @@ export async function flushTelemetry(): Promise<void> {
 
 export function isTelemetryEnabled(): boolean {
   return initialized && tracerProvider !== null;
+}
+
+// ─────────────────────────────────────────────
+// RED Metrics (Rate / Errors / Duration)
+// Label set TERTUTUP — tidak boleh user ID / URL / message.
+// ─────────────────────────────────────────────
+
+let httpDuration: ReturnType<ReturnType<typeof metrics.getMeter>["createHistogram"]> | null = null;
+let dbDuration: ReturnType<ReturnType<typeof metrics.getMeter>["createHistogram"]> | null = null;
+let genAiDuration: ReturnType<ReturnType<typeof metrics.getMeter>["createHistogram"]> | null = null;
+let s3Duration: ReturnType<ReturnType<typeof metrics.getMeter>["createHistogram"]> | null = null;
+let httpErrors: ReturnType<ReturnType<typeof metrics.getMeter>["createCounter"]> | null = null;
+
+function getMeter(): ReturnType<typeof metrics.getMeter> | null {
+  if (!meterProvider) return null;
+  try {
+    return metrics.getMeter(SERVICE_NAME, SERVICE_VERSION);
+  } catch {
+    return null;
+  }
+}
+
+function ensureMetrics(): void {
+  const meter = getMeter();
+  if (!meter || httpDuration) return;
+  httpDuration = meter.createHistogram("http.server.request.duration", {
+    description: "Duration of inbound HTTP requests",
+    unit: "ms",
+  });
+  httpErrors = meter.createCounter("http.server.request.errors", {
+    description: "Count of HTTP requests with error status (>=400)",
+    unit: "1",
+  });
+  dbDuration = meter.createHistogram("db.client.operation.duration", {
+    description: "Duration of CockroachDB operations",
+    unit: "ms",
+  });
+  genAiDuration = meter.createHistogram("gen_ai.client.operation.duration", {
+    description: "Duration of OpenRouter (LLM) operations",
+    unit: "ms",
+  });
+  s3Duration = meter.createHistogram("aws.s3.operation.duration", {
+    description: "Duration of S3 operations",
+    unit: "ms",
+  });
+}
+
+/** Status class (2xx/3xx/4xx/5xx) — label terkunci, bukan status mentah. */
+export function statusClass(code: number): string {
+  return `${Math.floor(code / 100)}xx`;
+}
+
+/**
+ * Normalisasi route untuk label metric — batasi cardinality:
+ * segmen UUID (session/memory id) diganti `:id`, query string dibuang.
+ */
+export function normalizeRoute(path: string): string {
+  const withoutQuery = path.split("?")[0];
+  const segments = withoutQuery.split("/").map((seg) =>
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(seg) ? ":id" : seg,
+  );
+  return segments.join("/");
+}
+
+/** Record durasi + error count sebuah HTTP request (dipanggil di handler.ts). */
+export function recordHttpRequest(
+  method: string,
+  route: string,
+  statusCode: number,
+  durationMs: number,
+): void {
+  ensureMetrics();
+  httpDuration?.record(durationMs, {
+    [ATTR_HTTP_REQUEST_METHOD]: method,
+    [ATTR_HTTP_ROUTE]: route,
+    "http.response.status_code.class": statusClass(statusCode),
+  });
+  if (statusCode >= 400) {
+    httpErrors?.add(1, {
+      [ATTR_HTTP_REQUEST_METHOD]: method,
+      [ATTR_HTTP_ROUTE]: route,
+      "http.response.status_code.class": statusClass(statusCode),
+    });
+  }
+}
+
+/** Record durasi operasi DB (dipanggil di crdb.ts wrapper). */
+export function recordDbOperation(operation: string, durationMs: number): void {
+  ensureMetrics();
+  dbDuration?.record(durationMs, {
+    [ATTR_DB_SYSTEM_NAME]: "cockroachdb",
+    [ATTR_DB_OPERATION_NAME]: operation,
+  });
+}
+
+/** Record durasi operasi GenAI (dipanggil di openrouter.ts wrapper). */
+export function recordGenAiOperation(operation: string, durationMs: number): void {
+  ensureMetrics();
+  genAiDuration?.record(durationMs, {
+    [ATTR_GEN_AI_SYSTEM]: "openrouter",
+    [ATTR_GEN_AI_OPERATION_NAME]: operation,
+  });
+}
+
+/** Record durasi operasi S3 (dipanggil di s3.ts wrapper). */
+export function recordS3Operation(operation: string, durationMs: number): void {
+  ensureMetrics();
+  s3Duration?.record(durationMs, {
+    [ATTR_RPC_SYSTEM]: "aws.s3",
+    "aws.s3.operation": operation,
+  });
 }

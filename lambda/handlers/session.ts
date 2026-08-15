@@ -8,6 +8,7 @@
 
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
 import { CrdbClient } from "../lib/crdb";
+import { logger } from "../lib/logger";
 
 interface SessionRow {
   id: string;
@@ -94,7 +95,7 @@ export async function handleSaveSession(
     );
     return { statusCode: 200, headers: CORS, body: JSON.stringify({ v: 1, ok: true, id: s.id }) };
   } catch (err) {
-    console.error("saveSession error:", err);
+    logger.error("session.save_failed", "saveSession error", { err: err instanceof Error ? err.message : String(err) });
     return {
       statusCode: 500,
       headers: CORS,
@@ -141,7 +142,7 @@ export async function handleListSessions(
       body: JSON.stringify({ v: 1, sessions: rows.map(toSession) }),
     };
   } catch (err) {
-    console.error("listSessions error:", err);
+    logger.error("session.list_failed", "listSessions error", { err: err instanceof Error ? err.message : String(err) });
     return {
       statusCode: 500,
       headers: CORS,

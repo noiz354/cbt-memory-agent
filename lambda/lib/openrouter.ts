@@ -13,6 +13,14 @@
 
 const BASE_URL = "https://openrouter.ai/api/v1";
 
+import { logger } from "./logger";
+import { context, trace } from "@opentelemetry/api";
+import {
+  ATTR_GEN_AI_SYSTEM,
+  ATTR_GEN_AI_OPERATION_NAME,
+} from "@opentelemetry/semantic-conventions/incubating";
+import { recordGenAiOperation } from "./telemetry";
+
 export const CHAT_MODEL = "openrouter/free";
 export const EMBED_MODEL = "baai/bge-m3";
 export const EMBED_DIM = 1024;
@@ -33,7 +41,7 @@ export class OpenRouterClient {
   constructor(apiKey?: string) {
     this.apiKey = apiKey ?? process.env.OPENROUTER_API_KEY ?? "";
     if (!this.apiKey) {
-      console.warn("OPENROUTER_API_KEY not set — OpenRouter calls will fail");
+      logger.warn("llm.openrouter_missing_key", "OPENROUTER_API_KEY not set — OpenRouter calls will fail");
     }
   }
 
@@ -45,32 +53,52 @@ export class OpenRouterClient {
   async generateEmbedding(text: string): Promise<number[]> {
     const trimmed = text.slice(0, 8000);
 
-    const res = await fetch(`${BASE_URL}/embeddings`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${this.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ model: EMBED_MODEL, input: trimmed }),
-    });
+    const tracer = trace.getTracer("cbt-memory-agent-backend", "0.1.0");
+    const parentCtx = context.active();
+    const span = tracer.startSpan("llm.embedding", { attributes: {} }, parentCtx);
+    const startedAt = Date.now();
 
-    if (!res.ok) {
-      throw new Error(`OpenRouter embeddings ${EMBED_MODEL}: HTTP ${res.status} ${res.statusText}`);
-    }
+    span.setAttribute(ATTR_GEN_AI_SYSTEM, "openrouter");
+    span.setAttribute(ATTR_GEN_AI_OPERATION_NAME, "embeddings");
+    span.setAttribute("gen_ai.request.model", EMBED_MODEL);
 
-    const data = (await res.json()) as {
-      data?: { embedding?: number[] }[];
-    };
-    const embedding = data.data?.[0]?.embedding;
-    if (!embedding || embedding.length === 0) {
-      throw new Error(`OpenRouter embeddings ${EMBED_MODEL}: empty result`);
+    try {
+      const res = await context.with(trace.setSpan(parentCtx, span), async () => {
+        const resp = await fetch(`${BASE_URL}/embeddings`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${this.apiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ model: EMBED_MODEL, input: trimmed }),
+        });
+
+        if (!resp.ok) {
+          throw new Error(`OpenRouter embeddings ${EMBED_MODEL}: HTTP ${resp.status} ${resp.statusText}`);
+        }
+
+        const data = (await resp.json()) as {
+          data?: { embedding?: number[] }[];
+        };
+        const embedding = data.data?.[0]?.embedding;
+        if (!embedding || embedding.length === 0) {
+          throw new Error(`OpenRouter embeddings ${EMBED_MODEL}: empty result`);
+        }
+        if (embedding.length !== EMBED_DIM) {
+          throw new Error(
+            `Embedding dim ${embedding.length} != ${EMBED_DIM} for ${EMBED_MODEL} — check EMBED_MODEL`,
+          );
+        }
+        return embedding;
+      });
+      return res;
+    } catch (err) {
+      span.recordException(err instanceof Error ? err : new Error(String(err)));
+      throw err;
+    } finally {
+      span.end();
+      recordGenAiOperation("embeddings", Date.now() - startedAt);
     }
-    if (embedding.length !== EMBED_DIM) {
-      throw new Error(
-        `Embedding dim ${embedding.length} != ${EMBED_DIM} for ${EMBED_MODEL} — check EMBED_MODEL`,
-      );
-    }
-    return embedding;
   }
 
   /**

@@ -9,6 +9,7 @@
 
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
 import { CrdbClient } from "../lib/crdb";
+import { logger } from "../lib/logger";
 
 interface MemoryNodeRow {
   id: string;
@@ -82,7 +83,7 @@ export async function handleListMemory(
       }),
     };
   } catch (err) {
-    console.error("listMemory error:", err);
+    logger.error("memory.list_failed", "listMemory error", { err: err instanceof Error ? err.message : String(err) });
     return {
       statusCode: 500,
       headers: CORS,
@@ -179,7 +180,7 @@ export async function handleUpsertMemory(
 
     return badRequest("Expected node or edge");
   } catch (err) {
-    console.error("upsertMemory error:", err);
+    logger.error("memory.upsert_failed", "upsertMemory error", { err: err instanceof Error ? err.message : String(err) });
     return {
       statusCode: 500,
       headers: CORS,
@@ -202,7 +203,7 @@ export async function handleDeleteMemory(
     );
     return { statusCode: 200, headers: CORS, body: JSON.stringify({ v: 1, ok: true, deletedId: id }) };
   } catch (err) {
-    console.error("deleteMemory error:", err);
+    logger.error("memory.delete_failed", "deleteMemory error", { err: err instanceof Error ? err.message : String(err) });
     return {
       statusCode: 500,
       headers: CORS,
@@ -225,7 +226,7 @@ export async function handleDeleteMemoryEdge(
     );
     return { statusCode: 200, headers: CORS, body: JSON.stringify({ v: 1, ok: true, deletedEdgeId: id }) };
   } catch (err) {
-    console.error("deleteMemoryEdge error:", err);
+    logger.error("memory.delete_edge_failed", "deleteMemoryEdge error", { err: err instanceof Error ? err.message : String(err) });
     return {
       statusCode: 500,
       headers: CORS,

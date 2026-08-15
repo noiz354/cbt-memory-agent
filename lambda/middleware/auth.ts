@@ -12,6 +12,7 @@
  */
 
 import { CrdbClient } from "../lib/crdb";
+import { logger } from "../lib/logger";
 
 export interface AuthResult {
   valid: boolean;
@@ -46,7 +47,9 @@ export async function validateAuth(
         return { valid: true, userId: row.id };
       }
     } catch (err) {
-      console.warn("[auth] session_token lookup failed, falling back:", err);
+      logger.warn("auth.session_lookup_fallback", "session_token lookup failed, falling back", {
+        err: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 

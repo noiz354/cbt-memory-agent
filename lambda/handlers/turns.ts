@@ -6,6 +6,7 @@
 
 import { APIGatewayProxyResult } from "aws-lambda";
 import { CrdbClient } from "../lib/crdb";
+import { logger } from "../lib/logger";
 
 interface ChatTurnRow {
   id: string;
@@ -60,7 +61,9 @@ export async function handleListSessionTurns(
       }),
     };
   } catch (err) {
-    console.error("listSessionTurns error:", err);
+    logger.error("turns.list_failed", "listSessionTurns error", {
+      err: err instanceof Error ? err.message : String(err),
+    });
     return {
       statusCode: 500,
       headers: CORS,
