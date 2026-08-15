@@ -215,3 +215,54 @@ SELECT
   s.duration_min,
   (SELECT COUNT(*) FROM chat_turns ct WHERE ct.session_id = s.id) AS turn_count
 FROM sessions s;
+
+-- ─────────────────────────────────────────────
+-- User Events (FASE 4: event tracking + monetisasi)
+-- ─────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS user_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  event_name STRING NOT NULL,
+  event_properties JSONB,
+  session_id STRING,
+  device_id STRING,
+  occurred_at TIMESTAMPTZ DEFAULT now(),
+  INDEX user_events_user_idx (user_id),
+  INDEX user_events_name_occurred_idx (event_name, occurred_at)
+);
+
+-- ─────────────────────────────────────────────
+-- Subscriptions (FASE 4: langganan/transaksi)
+-- ─────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS subscriptions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  plan_id STRING NOT NULL,
+  status STRING NOT NULL CHECK (status IN ('active', 'canceled', 'past_due', 'trialing', 'expired')),
+  amount DECIMAL(12,2) NOT NULL CHECK (amount >= 0),
+  currency STRING NOT NULL DEFAULT 'USD',
+  billing_cycle STRING NOT NULL CHECK (billing_cycle IN ('monthly', 'yearly')),
+  started_date TIMESTAMPTZ NOT NULL,
+  ended_date TIMESTAMPTZ,
+  cancelled_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  INDEX subscriptions_user_idx (user_id),
+  INDEX subscriptions_status_started_idx (status, started_date)
+);
+
+-- ─────────────────────────────────────────────
+-- Marketing Ad Spend (FASE 4: biaya akuisisi)
+-- ─────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS marketing_ad_spend (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  period_date DATE NOT NULL,
+  channel STRING NOT NULL,
+  cost DECIMAL(12,2) NOT NULL CHECK (cost >= 0),
+  currency STRING NOT NULL DEFAULT 'USD',
+  created_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE (period_date, channel)
+);

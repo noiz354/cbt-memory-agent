@@ -42,6 +42,8 @@ import { handlePurge } from "./handlers/purge";
 import { handleMetrics, handleHealth } from "./handlers/health";
 import { handleTelemetryRelay } from "./handlers/telemetry";
 import { handleRequestMagicLink, handleConsumeMagicLink } from "./handlers/auth";
+import { handleTrackEvents } from "./handlers/events";
+import { handleMonetizationCac, handleMonetizationSummary } from "./handlers/monetization";
 
 const crdb = new CrdbClient(process.env.CRDB_CONNECTION!);
 const llm = new OpenRouterClient();
@@ -214,6 +216,19 @@ async function route(
   // Metrics
   if (method === "GET" && path === "/api/v1/metrics") {
     return await handleMetrics(crdb, token, deviceId);
+  }
+
+  // Events (FASE 4 — tracking + monetisasi)
+  if (method === "POST" && path === "/api/v1/events") {
+    return await handleTrackEvents(event, crdb, token, deviceId);
+  }
+
+  // Monetization read endpoints (FASE 4)
+  if (method === "GET" && path === "/api/v1/monetization/cac") {
+    return await handleMonetizationCac(queryStringParameters, crdb);
+  }
+  if (method === "GET" && path === "/api/v1/monetization/summary") {
+    return await handleMonetizationSummary(queryStringParameters, crdb);
   }
 
   // Health
