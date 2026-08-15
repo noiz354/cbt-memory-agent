@@ -25,6 +25,19 @@ jobs:
         run: |
           npm ci
           npx tsc --noEmit
+          npm run typecheck:test
+
+      - name: Test (lambda)
+        working-directory: lambda
+        run: npm test
+
+      - name: Typecheck (frontend)
+        run: |
+          npm ci
+          npm run typecheck
+
+      - name: Build (frontend)
+        run: npm run build
 
       - name: Build Lambda zip
         run: bash scripts/build-lambda.sh

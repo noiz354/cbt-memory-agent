@@ -13,10 +13,11 @@
 
 import { context, trace, Span, SpanStatusCode, Context } from "@opentelemetry/api";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
+import { ZoneContextManager } from "@opentelemetry/context-zone";
 import { registerInstrumentations } from "@opentelemetry/instrumentation";
 import { FetchInstrumentation } from "@opentelemetry/instrumentation-fetch";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
-import { Resource } from "@opentelemetry/resources";
+import { resourceFromAttributes } from "@opentelemetry/resources";
 import {
   BatchSpanProcessor,
   ParentBasedSampler,
@@ -49,23 +50,31 @@ export function initTelemetry(): void {
 
   if (import.meta.env.VITE_OTEL_ENABLED !== "true") return;
 
-  const samplingRatio = Number(import.meta.env.VITE_OTEL_SAMPLING_RATIO ?? 0.1);
-  const ratio = Number.isFinite(samplingRatio) && samplingRatio > 0 ? samplingRatio : 0.1;
+  const samplingRatio = Number(import.meta.env.VITE_OTEL_SAMPLING_RATIO ?? 1.0);
+  // Browser meng-ekspor 100% span boundary; sampling head dilakukan di relay
+  // POST /api/v1/telemetry (env OTEL_RELAY_SAMPLING_RATIO) — pengganti Collector.
+  const ratio = Number.isFinite(samplingRatio) && samplingRatio > 0 ? samplingRatio : 1.0;
 
   const exporter = new OTLPTraceExporter({
     url: resolveEndpoint(import.meta.env.VITE_OTEL_TRACE_ENDPOINT),
-    headers: () => {
+    headers: async (): Promise<Record<string, string>> => {
       const auth = getAuthHeaders();
       return auth ? { Authorization: `Bearer ${auth.token}`, "X-Device-Id": auth.deviceId } : {};
     },
   });
 
   tracerProvider = new WebTracerProvider({
-    resource: new Resource({ [SEMRESATTRS_SERVICE_NAME]: SERVICE_NAME }),
+    resource: resourceFromAttributes({ [SEMRESATTRS_SERVICE_NAME]: SERVICE_NAME }),
     sampler: new ParentBasedSampler({ root: new TraceIdRatioBasedSampler(ratio) }),
+    spanProcessors: [new BatchSpanProcessor(exporter)],
   });
-  tracerProvider.addSpanProcessor(new BatchSpanProcessor(exporter));
-  tracerProvider.register({ propagator: new W3CTraceContextPropagator() });
+  tracerProvider.register({
+    propagator: new W3CTraceContextPropagator(),
+    // ZoneContextManager menyebarkan trace context melintasi async boundaries
+    // (setTimeout, promise, fetch callback) di browser — menjamin span yang
+    // dibuat di call stack berbeda tetap anak dari trace yang sama.
+    contextManager: new ZoneContextManager(),
+  });
 
   registerInstrumentations({
     instrumentations: [
