@@ -237,3 +237,31 @@ Fondasi event ingestion + aggregasi keuangan + dashboard monetisasi. **✅ DEPLO
 - [x] **Deploy live** — `terraform apply` (source_code_hash) → Lambda Function URL ap-southeast-3. Curl live: POST /events → 201 {inserted:2,rejected:1}; GET /monetization/cac?period=2026-06 → {spend:2346.34,newPayingUsers:7,cac:335.19}; GET /monetization/summary?period=2026-06 → {mrr:1349,arr:16188,arpu:103.77,arppu:64.24,ltv:254.23,ltvCac:0.76,revenueChurnRate:1.4,cac:335.19,churnRate:0.29}.
 - [x] **Grafana provisioning gotchas fixed** — (1) `.env` tidak bisa di-bash-`source` (baris bare base64 token) → loader grep-based; (2) Grafana 13.2 postgres datasource API wajib `access:"proxy"`; (3) `node -e` argv mulai `slice(1)` (bukan slice(2)) saat arg ikut.
 - [ ] **Masih terbuka (Review/SHIP decisions)** — API mengembalikan rasio 0..1 sedangkan panel Grafana persen (*100): dokumentasi sudah ada di ADR-002; `getUserChurnRate` fallback `?? 0` saat paying=0 (proxy data-driven; butuh sumber billing asli seperti Stripe untuk produksi); rate limiting + auth ketat untuk POST /events di produksi.
+
+## FASE 1+2+3: Core Telemetry · UX Funnel · Retention & Cohort (2026-08-15)
+
+Fondasi event stream produksi, funnel aktivasi, dan cohort retention. **✅ DEPLOYED + VERIFIED live** (CRDB `woozy-grivet`, Lambda ap-southeast-3, Grafana Cloud `imanino`). Spesifikasi & ADR di `docs/15-8-26/` (FASE123-ANALYTICS-SPEC.md, ADR-003-analytics.md).
+
+### FASE 1 — Core Telemetry
+- [x] **Event catalog terpusat** (`lambda/lib/eventCatalog.ts`) — 30 event, 8 kategori (core/auth/chat/crisis/voice/memory/privacy/monetization); `partitionEvents`/`isAllowedEventName` pindah ke katalog (re-export dari `monetization.ts`, allowlist monetisasi 6 nama tetap).
+- [x] **Frontend track layer** (`src/shared/lib/telemetryEvents.ts`) — `track(name, properties?)` + konstanta `TELEMETRY_EVENTS`, wrapping buffer `trackEvent.ts`.
+- [x] **Wiring ~20 call-site** — authStore (login_completed magic-link+passkey, onboarding_completed), appStore (crisis_triggered/resolved), AppShell (app_launch + RouteTracker page_view via `useLocation`), PasskeyPanel (signup_completed), chatStore (session_started, message_sent, stream_done, stream_truncated ×2, resumeStream), CrisisOverlay (crisis_grounding_done ref-guarded), SwipeToCall (crisis_lifeline_used), voiceNote (voice_note_recorded, transcript_received whisper/web-speech), memoryStore (memoryAdded/Updated/Deleted/EdgeLinked), MemoryPage (memorySearched), sessionStore (sessionFinalized/Interrupted), exportBundle (export_completed), hardPurge+DestructionKey (purge*).
+- [x] **Bug metric.* diperbaiki** — `addNode` salah panggil `graphLinkCreated` → `track(memoryAdded)`; metric dead-code di-wire (purgeStarted/Completed/Abandon/postPurgeResidue, streamTruncated, crisisGroundingDone, crisisLifelineTap, sessionFinalized/Orphaned/RequeueOk); fix brace `hardHalt` di chatStore (syntax error saat build).
+
+### FASE 2 — UX Funnel
+- [x] **Backend** (`lambda/lib/analytics.ts` + `lambda/handlers/analytics.ts`) — GET `/api/v1/analytics/funnel?period&steps`: distinct user per step + konversi antar-step NULLIF-safe; default steps signup_completed→onboarding_completed→message_sent→session_finalized; `steps` divalidasi terhadap catalog.
+- [x] **SQL** (`schema/analytics-queries.sql`) — per-step counts + conversion pct (Grafana macro + standalone), NULLIF-safe.
+
+### FASE 3 — Retention & Cohort
+- [x] **Backend** — GET `/api/v1/analytics/activity` → {dau,wau,mau,stickyFactor} (user_events ∪ users.last_active); GET `/api/v1/analytics/retention` → cohort matrix (cohort = bulan `users.created_at`, window periodStart−5 bulan, retensi per umur bulan, NULLIF-safe). Fix: `cohortsStart` tidak terpakai (hanya cohort bulan berjalan) → dipakai; `age/size/active` di-`Number()` (pg mengembalikan string).
+- [x] **SQL** — DAU/WAU/MAU date_trunc, cohort retention CTE, sticky factor — semua `::numeric` + NULLIF.
+- [x] **Seed rework** (`scripts/seed-monetization.ts`) — hapus `seed-%@example.com` (CASCADE); `users.created_at` di-backdate per bulan join (JOIN_WEIGHTS); emit telemetry aktivasi (signup→onboarding→message→finalized dengan drop-off per tahap) + aktivitas bulanan per cohort (RETENTION_CURVE decay).
+- [x] **Grafana** — dashboard `infra/grafana/analytics-dashboard.json` (uid `analytics`, 5 panel: activation funnel bargauge, conversion stat, DAU/WAU/MAU timeseries, sticky factor stat, cohort retention table) + `grafana-provision.sh` diparametrize (loop import SEMUA `infra/grafana/*.json`). **Sukses live** https://imanino.grafana.net/d/analytics/cac9c6c.
+- [x] **Fix quirk CockroachDB v26.2.5** — `COUNT(DISTINCT user_id) FILTER (WHERE event_name=…)` + range timestamptz + multi-aggregat mengembalikan jumlah kecil yang salah (4|4|2|5) → diganti `COUNT(DISTINCT CASE WHEN event_name='X' THEN user_id END)` → benar (40|31|30|19). Catatan di `analytics-queries.sql`. `getFunnel` lib pakai WHERE-style jadi tidak terdampak.
+
+### Verifikasi live
+- [x] **Tests** — lambda `npm test` 56/56 ✓ (eventCatalog 9, analytics 12, monetization 13, telemetry 9, contract 8, logger 5), `npx tsc --noEmit` ✓, frontend `npm run typecheck` + `vite build` ✓.
+- [x] **Seed live** — users 40 (cohorts 03:2/04:4/05:12/06:9/07:5/08:13), subscriptions 40, user_events 385 (page_view 129, signup 40, onboarding 31, message 30, finalized 19).
+- [x] **Deploy live** — `terraform apply` (source_code_hash, version 11) → Lambda dengan 3 route analytics baru. Curl live: funnel?period=2026-06 → {signup 9, onboarding 6, message 7, finalized 3}; activity → {dau 2, wau 13, mau 24, sticky 0.08}; retention → matrix cohort 03/04/05/06, ages 0-3, decay 100→50 / 100→91.67.
+- [x] **Grafana E2E** — POST /api/ds/query funnel (CASE WHEN) → 40|31|30|19 via proxy Grafana, cocok dengan psql.
+- [ ] **Masih terbuka** — endpoint analytics = agregat lintas-user (wajar untuk app single-user/demo; hardening rate-limit/auth-admin dicatat di ADR-003); sumber aktivitas `users.last_active` hanya ter-update oleh seed — perlu update berkala di produksi.
