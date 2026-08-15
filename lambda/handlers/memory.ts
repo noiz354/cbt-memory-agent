@@ -9,6 +9,8 @@
 
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
 import { CrdbClient } from "../lib/crdb";
+import { OpenRouterClient } from "../lib/openrouter";
+import { EMBED_TEXT_SOURCE, embeddingText, toVectorLiteral } from "../lib/vectors";
 import { logger } from "../lib/logger";
 
 interface MemoryNodeRow {
@@ -95,6 +97,7 @@ export async function handleListMemory(
 export async function handleUpsertMemory(
   event: APIGatewayProxyEvent,
   crdb: CrdbClient,
+  llm: OpenRouterClient,
   token: string,
   deviceId: string,
 ): Promise<APIGatewayProxyResult> {
@@ -155,6 +158,11 @@ export async function handleUpsertMemory(
           node.crisis_flag ?? false,
         ],
       );
+
+      // Vector writer — best-effort: kegagalan embedding TIDAK menggagalkan
+      // upsert memory (node tetap tersimpan), tapi dicatat agar terlihat.
+      await writeNodeEmbedding(crdb, llm, userId, node);
+
       return { statusCode: 200, headers: CORS, body: JSON.stringify({ v: 1, ok: true, id: node.id }) };
     }
 
@@ -249,6 +257,44 @@ async function getUserId(crdb: CrdbClient, token: string): Promise<string> {
     [token],
   );
   return userId;
+}
+
+/**
+ * Vector writer — generate embedding untuk sebuah memory node dan simpan ke
+ * tabel `embeddings`. Best-effort: jika embedding gagal (mis. OpenRouter down),
+ * error dicatat tapi TIDAK dilempar — memory node tetap tersimpan.
+ *
+ * Selalu hapus embedding lama node dulu (node bisa di-upsert ulang), lalu insert
+ * versi baru, sehingga `embeddings` tidak menumpuk versi usang per node.
+ */
+async function writeNodeEmbedding(
+  crdb: CrdbClient,
+  llm: OpenRouterClient,
+  userId: string,
+  node: { id: string; title: string; excerpt?: string | null },
+): Promise<void> {
+  try {
+    const text = embeddingText(node).slice(0, 8000);
+    if (!text) return;
+
+    const embedding = await llm.generateEmbedding(text);
+    const literal = toVectorLiteral(embedding);
+
+    await crdb.execute(
+      `DELETE FROM embeddings WHERE user_id = $1::uuid AND node_id = $2`,
+      [userId, node.id],
+    );
+    await crdb.execute(
+      `INSERT INTO embeddings (user_id, node_id, embedding, text_source)
+       VALUES ($1::uuid, $2, $3, $4)`,
+      [userId, node.id, literal, EMBED_TEXT_SOURCE],
+    );
+  } catch (err) {
+    logger.warn("memory.embedding_failed", "Embedding write skipped (best-effort)", {
+      err: err instanceof Error ? err.message : String(err),
+      nodeId: node.id,
+    });
+  }
 }
 
 function toNode(row: MemoryNodeRow) {

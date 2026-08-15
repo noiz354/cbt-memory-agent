@@ -180,7 +180,7 @@ async function route(
     return await handleListMemory(crdb, token, deviceId);
   }
   if (method === "POST" && path === "/api/v1/memory") {
-    return await handleUpsertMemory(event, crdb, token, deviceId);
+    return await handleUpsertMemory(event, crdb, llm, token, deviceId);
   }
   if (method === "DELETE" && path.startsWith("/api/v1/memory/edge/")) {
     const id = path.split("/").pop()!;

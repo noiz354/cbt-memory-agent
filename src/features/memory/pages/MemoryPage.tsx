@@ -112,7 +112,7 @@ export function MemoryPage() {
             </div>
           ) : (
             <p className="text-xs text-ink-mute">
-              No semantic matches — embeddings may be empty server-side. Use the local substring search or add memories.
+              No semantic matches — add memories first, or use the local substring search.
             </p>
           )}
         </div>

@@ -112,9 +112,10 @@ CREATE TABLE IF NOT EXISTS embeddings (
   INDEX embeddings_node_idx (node_id)
 );
 
--- Vector index untuk semantic search
--- CockroachDB v25.2+ supports CREATE VECTOR INDEX
-CREATE VECTOR INDEX IF NOT EXISTS embeddings_vector_idx ON embeddings (embedding);
+-- Vector index untuk semantic search (C-SPANN, cosine)
+-- v25.2+ mendukung CREATE VECTOR INDEX; cosine di-accelerate sejak v25.4 GA.
+-- Opclass vector_cosine_ops dipilih agar cocok dengan query `<=>` (semanticSearch.ts).
+CREATE VECTOR INDEX IF NOT EXISTS embeddings_vector_idx ON embeddings (embedding vector_cosine_ops);
 
 -- ─────────────────────────────────────────────
 -- Sessions (CBT therapy sessions)

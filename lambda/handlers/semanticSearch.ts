@@ -9,6 +9,7 @@
 
 import { CrdbClient } from "../lib/crdb";
 import { OpenRouterClient } from "../lib/openrouter";
+import { toVectorLiteral } from "../lib/vectors";
 import { logger } from "../lib/logger";
 
 interface SearchRow {
@@ -84,10 +85,6 @@ async function getUserId(crdb: CrdbClient, token: string): Promise<string> {
     [token],
   );
   return row?.user_id ?? "";
-}
-
-function toVectorLiteral(embedding: number[]): string {
-  return `[${embedding.map((v) => v.toFixed(6)).join(",")}]`;
 }
 
 function corsHeaders(): Record<string, string> {
