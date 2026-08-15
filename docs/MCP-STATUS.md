@@ -1,11 +1,13 @@
 # CockroachDB MCP Server — Implementation Status
 
-> Status implementasi CockroachDB Cloud Managed MCP Server untuk backend Lambda.
+> Status implementasi **CockroachDB Cloud Managed MCP Server** (endpoint
+> `https://cockroachlabs.cloud/mcp`) untuk agent tooling proyek ini.
 
-**Tanggal:** 2026-08-13  
+**Tanggal:** 2026-08-16 (terakhir diperbarui)  
 **Cluster:** woozy-grivet (AWS ap-southeast-3, Serverless, v26.2.5)  
 **Spend Limit:** $0.00/month ✅  
-**ccloud CLI:** ✅ Sudah login dan bisa akses cluster
+**ccloud CLI:** ✅ Sudah login dan bisa akses cluster  
+**Managed MCP:** ✅ **AKTIF — read-only, terverifikasi live**
 
 ---
 
@@ -19,190 +21,56 @@
 | Spend limit $0.00 | ✅ Set | Verified via `ccloud cluster info` |
 | Schema SQL file | ✅ Ready | `schema/crdb-schema.sql` |
 | Query patterns SQL | ✅ Ready | `scripts/04-query-patterns.sql` |
+| Schema applied live | ✅ Done | 12 tabel + vector index + fulltext inverted index live |
+| Vector indexing verified | ✅ Done | `embeddings_vector_idx` (user_id, vector_cosine_ops) live |
+| **Managed MCP active (read-only)** | ✅ **Done 2026-08-16** | Endpoint `https://cockroachlabs.cloud/mcp` + header `mcp-cluster-id` + `Authorization: Bearer $CCLOUD_MCP_API_KEY` |
 
 ---
 
 ## 🚧 YANG BELUM SELESAI
 
-### 1. Apply Schema ke Cluster (PRIORITAS #1)
+### 1. MCP write mode
 
-**Status:** ⏳ Belum dilakukan  
-**Cluster:** woozy-grivet  
-**Command:**
+**Status:** ⏳ Sengaja **tidak diaktifkan** — keputusan desain: Managed MCP dipakai
+**read-only** untuk introspeksi schema, eksplorasi data, dan diagnosa query. Semua
+write tetap lewat Lambda data-path (`pg.Pool`). Jika demo butuh write via MCP,
+ganti API key ke service account dengan peran write + consent di Cloud Console.
 
-```bash
-cd /home/norman2/14-8-26-aws-x-coachroachdb-merge
+### 2. Lambda MCP Client (deprecated — tidak dibuat)
 
-# Apply schema
-ccloud cluster sql woozy-grivet -f schema/crdb-schema.sql
-
-# Verify tables
-ccloud cluster sql woozy-grivet -c "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name;"
-
-# Verify indexes
-ccloud cluster sql woozy-grivet -c "SELECT table_name, index_name FROM crdb_internal.table_indexes WHERE schema_name = 'public' ORDER BY table_name, index_name LIMIT 20;"
-
-# Verify pgvector
-ccloud cluster sql woozy-grivet -c "SELECT extname, extversion FROM pg_extension WHERE extname = 'vector';"
-```
-
-### 2. Setup MCP Server via Cloud Console
-
-**Status:** ⏳ Belum dilakukan (ccloud CLI tidak support MCP commands)  
-**Cara:** Manual via web UI
-
-**Langkah:**
-1. Buka https://cockroachlabs.cloud
-2. Login → Pilih cluster **woozy-grivet**
-3. Cari menu **"MCP Server"** atau **"AI Integration"**
-4. Enable MCP Server dengan setting:
-   - Mode: read-write
-   - Name: cbt-memory-mcp
-5. Copy MCP endpoint URL (format: `https://cockroachlabs.cloud/mcp/...`)
-
-**Setelah dapat MCP endpoint, update config:**
-
-```json
-// mcp/mcp-config.json
-{
-  "mcpServers": {
-    "cockroachdb": {
-      "url": "https://cockroachlabs.cloud/mcp/YOUR_CLUSTER_ID",
-      "cluster": "woozy-grivet",
-      "mode": "read-write",
-      "tools": [
-        "search_memory",
-        "get_profile",
-        "add_chunk",
-        "promote_to_core",
-        "get_event_log"
-      ]
-    }
-  }
-}
-```
-
-### 3. Get Connection String untuk Lambda
-
-**Status:** ⏳ Belum diambil  
-**Command:**
-
-```bash
-# Get connection URL
-ccloud cluster sql woozy-grivet --connection-url
-
-# Atau get connection params
-ccloud cluster sql woozy-grivet --connection-params
-```
-
-**Output akan berisi:**
-- Host
-- Port (biasanya 26257)
-- Database (defaultdb)
-- Username
-- Password (atau cert path)
-
-**Simpan untuk Lambda environment variables:**
-```
-CRDB_HOST=...
-CRDB_PORT=26257
-CRDB_DATABASE=defaultdb
-CRDB_USERNAME=...
-CRDB_PASSWORD=...
-CRDB_SSL_MODE=verify-full
-```
-
-### 4. Setup Distributed Vector Indexing (WAJIB #2)
-
-**Status:** ⏳ Sudah ada di schema, belum verified  
-**Verification commands:**
-
-```bash
-# Check vector column
-ccloud cluster sql woozy-grivet -c "
-  SELECT column_name, data_type 
-  FROM information_schema.columns 
-  WHERE table_name = 'embeddings' AND column_name = 'embedding';
-"
-
-# Check vector index
-ccloud cluster sql woozy-grivet -c "
-  SELECT index_name, index_type 
-  FROM crdb_internal.table_indexes 
-  WHERE table_name = 'embeddings' AND index_name LIKE '%vector%';
-"
-
-# Test vector query (akan return 0 rows)
-ccloud cluster sql woozy-grivet -c "
-  SELECT 'vector_ready' AS status 
-  FROM embeddings 
-  LIMIT 0;
-"
-```
-
-### 5. Create Lambda MCP Client
-
-**Status:** ⏳ Belum dibuat  
-**File:** `lambda/lib/crdb-mcp.ts` (belum ada)  
-**Isi:** MCP client code untuk Lambda → CockroachDB communication
+**Status:** ❌ Tidak dibuat. Lambda memakai `pg.Pool` langsung (lihat
+`lambda/lib/crdb.ts`). Managed MCP adalah **agent tooling** (sesi development/
+triage), bukan data-plane aplikasi.
 
 ---
 
-## 📋 NEXT STEPS (URUTAN PRIORITAS)
+## 📋 AUTH MANAGED MCP (AKTIF)
 
-### Step 1: Apply Schema (5 menit)
+- **Endpoint:** `https://cockroachlabs.cloud/mcp`
+- **Header wajib:**
+  - `mcp-cluster-id: 87275047-fbf8-4f18-8b8d-a5ff97a335e3`
+  - `Authorization: Bearer $CCLOUD_MCP_API_KEY` (service account, read-only)
+- **Config file:** `mcp/mcp-config.json` (JSON-RPC HTTP) + `.mcp.json` (Claude Code / editor)
 
-```bash
-cd /home/norman2/14-8-26-aws-x-coachroachdb-merge
-ccloud cluster sql woozy-grivet -f schema/crdb-schema.sql
-```
+## 📊 MCP TOOLS — BUKTI LIVE (2026-08-16)
 
-### Step 2: Verify Schema (2 menit)
+Semua tool read-only berhasil dipanggil via JSON-RPC POST ke managed endpoint
+(autentikasi service-account API key). Bukti tersimpan di `docs/15-8-26/mcp-proof/`:
 
-```bash
-ccloud cluster sql woozy-grivet -c "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name;"
-```
+| Tool | Hasil live | File bukti |
+|---|---|---|
+| `tools/list` | 9 tool tersedia (read + write opt-in) | `tools-list.txt` |
+| `list_databases` | `defaultdb` (owner root) | `list-databases.txt` |
+| `list_tables` | 12 tabel; `memory_nodes` 10.003 rows, `embeddings` 10.003 | `list-tables.txt` |
+| `get_table_schema` | `embeddings` + `VECTOR INDEX embeddings_vector_idx (user_id, embedding vector_cosine_ops)` | `get-table-schema-embeddings.txt` |
+| `explain_query` (keyword) | Plan memakai `memory_nodes_search_idx` (inverted index), 1 span | `explain-keyword-query.txt` |
+| `explain_query` (vector) | Error `different vector dimensions 4 and 1024` — **guardrail nyata** (literal vector salah dimensi ditolak tanpa eksekusi) | `explain-vector-query.txt` |
+| `select_query` | `SELECT COUNT(*) FROM memory_nodes` → `10003` | `select-query-count.txt` |
+| `get_cluster` | `woozy-grivet`, v26.2.5, AWS, BASIC, ap-southeast-3 | `get-cluster.txt` |
 
-Expected output:
-```
-table_name
---------------
-audit_events
-chat_turns
-embeddings
-memory_edges
-memory_nodes
-sessions
-users
-```
-
-### Step 3: Get Connection Info (2 menit)
-
-```bash
-ccloud cluster sql woozy-grivet --connection-url
-ccloud cluster sql woozy-grivet --connection-params
-```
-
-### Step 4: Setup MCP Server via Web UI (10 menit)
-
-1. Login ke https://cockroachlabs.cloud
-2. Pilih cluster **woozy-grivet**
-3. Enable MCP Server
-4. Copy endpoint URL
-5. Update `mcp/mcp-config.json`
-
-### Step 5: Verify Vector Indexing (3 menit)
-
-```bash
-ccloud cluster sql woozy-grivet -c "SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'embeddings' AND column_name = 'embedding';"
-```
-
-### Step 6: Test End-to-End (15 menit)
-
-Setelah semua di atas done:
-- Test MCP endpoint (via Claude Code/Cursor atau curl)
-- Test connection dari Lambda (deploy test function)
-- Verify semua 5 tools working
+> **Catatan:** `explain_query` tidak mendukung `EXPLAIN ANALYZE` (batch menolak).
+> Tool write (`create_database`, `create_table`, `insert_rows`) tersedia di `tools/list`
+> tapi TIDAK dicoba — konsisten dengan keputusan read-only.
 
 ---
 
@@ -210,26 +78,17 @@ Setelah semua di atas done:
 
 | Requirement | Status | Bukti |
 |---|---|---|
-| CockroachDB Tool #1: MCP Server | ⏳ Pending | Setup via web UI |
-| CockroachDB Tool #2: Distributed Vector Indexing | ⏳ Pending | Verify setelah schema applied |
+| CockroachDB Tool #1: Managed MCP Server | ✅ **Done (read-only, live)** | `docs/15-8-26/mcp-proof/` + config |
+| CockroachDB Tool #2: Distributed Vector Indexing | ✅ Done | `embeddings_vector_idx` + semantic search + hybrid keyword |
+| CockroachDB Tool #3: ccloud CLI | ✅ Done | Provisioning + audit script |
+| CockroachDB Tool #4: Agent Skills Repo | ✅ Done | Vendor `skills/cockroachdb-skills/` |
 | AWS Service #1: Lambda | ✅ Done | Deployed (ap-southeast-3) |
 | LLM + Embeddings: OpenRouter | ✅ Done | `lambda/lib/openrouter.ts` |
 | AWS Service #2: S3 | ✅ Done | Export bucket |
 | Public Repo + MIT License | ✅ Done | Repo ini |
-| README + Setup Instructions | ⏳ Pending | Update setelah semua done |
-| Video Demo (< 3 menit) | ⏳ Pending | Record setelah functional |
+| README + Setup Instructions | ⏳ Pending | Update di Workstream E |
 
 ---
 
-## 📚 FILES TERKAIT
-
-- `schema/crdb-schema.sql` — Schema dengan 7 tables + pgvector + indexes
-- `scripts/04-query-patterns.sql` — 10 SQL patterns (decay, promote, recall, CRUD)
-- `mcp/mcp-config.json` — MCP config (perlu update setelah setup)
-- `docs/DATABASE-ENGINEER-PLAN.md` — Rencana lengkap Database Engineer
-- `docs/MCP-IMPLEMENTATION.md` — Implementation guide MCP Server
-
----
-
-**Last Updated:** 2026-08-13 22:55 UTC  
-**Next Action:** `ccloud cluster sql woozy-grivet -f schema/crdb-schema.sql`
+**Last Updated:** 2026-08-16  
+**Next Action:** (WS-E) update README tools matrix + demo script

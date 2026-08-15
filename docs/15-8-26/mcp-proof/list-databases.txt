@@ -1,0 +1,3 @@
+event: message
+data: {"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"{\"rows\":[{\"database_name\":\"defaultdb\",\"owner\":\"root\",\"primary_region\":null,\"secondary_region\":null,\"regions\":[],\"survival_goal\":null}]}"}]}}
+
