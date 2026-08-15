@@ -18,6 +18,7 @@ import { handleListSessionTurns } from "./handlers/turns";
 import { handleExport } from "./handlers/export";
 import { handlePurge } from "./handlers/purge";
 import { handleMetrics, handleHealth } from "./handlers/health";
+import { handleRequestMagicLink, handleConsumeMagicLink } from "./handlers/auth";
 
 const crdb = new CrdbClient(process.env.CRDB_CONNECTION!);
 const llm = new OpenRouterClient();
@@ -48,9 +49,14 @@ export async function handler(
   const queryStringParameters =
     event.queryStringParameters ?? parseQueryString(event.rawQueryString ?? "");
 
-  // Auth middleware — skip for health check
-  if (path !== "/api/v1/health") {
-    const authResult = validateAuth(token, deviceId);
+  // Public routes — skip auth middleware (health + magic-link request/consume).
+  const isPublic =
+    path === "/api/v1/health" ||
+    path === "/api/v1/auth/magic-link" ||
+    path === "/api/v1/auth/callback";
+
+  if (!isPublic) {
+    const authResult = await validateAuth(token, deviceId, crdb);
     if (!authResult.valid) {
       return {
         statusCode: authResult.statusCode ?? 401,
@@ -62,6 +68,14 @@ export async function handler(
 
   // Route handling
   try {
+    // Auth (public)
+    if (method === "POST" && path === "/api/v1/auth/magic-link") {
+      return await handleRequestMagicLink(event, crdb);
+    }
+    if (method === "POST" && path === "/api/v1/auth/callback") {
+      return await handleConsumeMagicLink(event, crdb);
+    }
+
     // Chat
     if (method === "POST" && path === "/api/v1/chat/turn") {
       return await handleChatTurn(event, crdb, llm, token, deviceId);

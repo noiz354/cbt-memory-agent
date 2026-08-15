@@ -21,6 +21,7 @@ export interface SessionProfile {
   consentAcceptedAt: string | null;
   consentVersion: string;
   credentialId: string | null;
+  sessionToken?: string;
   emergency: EmergencyContact | null;
 }
 

@@ -1,7 +1,7 @@
 import { useAuthStore } from "@/features/auth/store/authStore";
 import { Button } from "@/shared/ui/Button";
 import { AnimatePresence, motion } from "framer-motion";
-import { Inbox, Mail } from "lucide-react";
+import { Inbox, Loader2, Mail, Send } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 
@@ -13,27 +13,48 @@ interface MagicLinkFormProps {
 export function MagicLinkForm({ email, displayName }: MagicLinkFormProps) {
   const issueMagicLink = useAuthStore((s) => s.issueMagicLink);
   const [token, setToken] = useState<string | null>(null);
+  const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  const send = () => {
+  const send = async () => {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       setError("Enter a valid email — it labels the local session only.");
       return;
     }
     setError(null);
-    setToken(issueMagicLink(email, displayName));
+    setLoading(true);
+    const res = await issueMagicLink(email, displayName);
+    setLoading(false);
+    if (!res.ok) {
+      setError(res.error ?? "Failed to request a magic link. Try again.");
+      return;
+    }
+    if (res.sent) {
+      setSent(true);
+      setToken(null);
+    } else {
+      setSent(false);
+      setToken(res.token);
+    }
   };
 
   return (
     <div>
-      <Button className="w-full" size="lg" onClick={send}>
-        <Mail className="size-4" />
-        Email me a magic link
+      <Button className="w-full" size="lg" onClick={send} disabled={loading}>
+        {loading ? <Loader2 className="size-4 animate-spin" /> : <Mail className="size-4" />}
+        {loading ? "Sending…" : "Email me a magic link"}
       </Button>
       {error && <p className="mt-2 text-sm text-danger">{error}</p>}
+      {sent && (
+        <p className="mt-3 inline-flex items-center gap-2 text-sm font-medium text-teal-700">
+          <Send className="size-3.5" />
+          Sign-in link sent to {email}. Check your inbox — it expires in 10 minutes.
+        </p>
+      )}
 
       <AnimatePresence>
-        {token && (
+        {!sent && token && (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -46,8 +67,8 @@ export function MagicLinkForm({ email, displayName }: MagicLinkFormProps) {
               On-device inbox preview
             </p>
             <p className="mt-2 text-sm leading-6 text-ink-mute">
-              There is no mail server in this build. The link below is the same artifact a
-              production sender would deliver — consuming it authenticates this browser only.
+              No mail server configured in this build, so the link below is shown here instead of
+              being emailed. Consuming it authenticates this browser only.
             </p>
             <Link
               to={`/auth/callback?token=${token}`}

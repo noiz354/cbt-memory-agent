@@ -130,10 +130,8 @@ These make the "on-device, zero-cloud" branding true for the parts that are curr
 ### 3.1 🟢 Implement `/metrics` (see 2.3)
 Backend stub `health.ts:39` returns empty arrays. Needs a real aggregation query + an audit-store write path. (Frontend work in 2.3.)
 
-### 3.2 🔶 Real token verification in `validateAuth`
-- **Why:** `lambda/middleware/auth.ts:30-35` rejects malformed tokens but still accepts any well-formed token as `userId = token`.
-- **What:** at onboarding, generate a high-entropy `session_token` server-side and store it bound to the `users` row; `validateAuth` looks it up and returns the real `userId` (never trust the client-supplied value). Keep `profile.id` as a public user id, but stop using it as the bearer secret.
-- **Files:** `lambda/middleware/auth.ts`, `lambda/handlers/chatTurn.ts:151-154` (user upsert), `src/features/auth/store/authStore.ts`, `src/shared/lib/authSession.ts`.
+### 3.2 ✅ DONE — Real token verification in `validateAuth`
+- **Status (2026-08-15, Phase C, via Resend magic-link):** backend now mints a server-side `session_token` (32 B `crypto.randomBytes`) at magic-link consumption, stores it on the `users` row (`users.session_token` added to schema); `validateAuth` (now async, takes `crdb`) does `SELECT id FROM users WHERE session_token=$1` and returns the row's id. Legacy `profile.id` tokens still pass via fallback (`userId = token`) so old sessions keep working. `getAuthHeaders` prefers `sessionToken` over `profile.id`. **Deployment pending:** schema + env not yet applied to the live Lambda.
 - **Acceptance:** a forged/guessed token is rejected; the server derives `userId` from its own table.
 
 ### 3.3 🟢 `/memory/semantic` search is implemented but unused
@@ -166,7 +164,7 @@ Baseline made it fail-loud; now actually set the env var to the deployed fronten
 - **4.3** Re-run Lighthouse against `npm run build` + `vite preview` (or the deployed bundle) to get real perf numbers and confirm CWV. (WEB-QUALITY §7#5.)
 - **4.4** Fix the misleading privacy copy ("never leaves this device") or gate cloud sync behind an explicit opt-in, per SECURITY §2.6.
 - **4.5** Complete passkey (`navigator.credentials.get()` assertion ceremony) or remove the fake local-key fallback, per SECURITY §2.5.
-- **4.6** Send the real display name to the server (today every user is `'device-user'`), per SECURITY §4.1.
+- **4.6** Send the real display name to the server — **partial (2026-08-15):** magic-link consumption now stores the user's `email` as `display_name` (email prefix) instead of hardcoding `'device-user'` for magic-link users. Passkey/legacy path still `'device-user'`.
 - **4.7** Replace remaining seed data with true empty states on first run (baseline fixed the hydrate-failure path only; the *initial* seed on a brand-new store remains demo content).
 - **4.8** Remove dead code surfaced by the audit: `metrics.ts` crisis wrappers, `uploadExportBundle` (if 3.4 not chosen), `coreMemories()`, `nodeScale()`, `searchMemory`'s unused state after 2.1.
 
@@ -181,4 +179,4 @@ Baseline made it fail-loud; now actually set the env var to the deployed fronten
 | **C — Real auth** | 3.2, 3.7, 4.4, 4.5 | Remove the security blockers before any real deployment |
 | **D — Hardening** | 3.5, 3.6, 4.1–4.3, 4.6–4.8 | Production readiness |
 
-> **Phases A + B completed 2026-08-15** (see PROGRESS.md). Remaining: Phase C (real auth) + Phase D (hardening) below.
+> **Phases A + B completed 2026-08-15** (see PROGRESS.md). Phase C (real auth) partially done 2026-08-15: **3.2 real token verification + Resend magic-link email backend** implemented (deployment pending — needs `aws login` + schema/env apply). Remaining Phase C: 3.7 device registry, 4.4 privacy copy, 4.5 passkey `credentials.get()`. Phase D (hardening): open below.

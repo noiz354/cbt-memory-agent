@@ -298,6 +298,20 @@ export const apiClient = {
       }[];
     }>(`/session/${sessionId}/turns`, { token, deviceId }),
 
+  /** POST /auth/magic-link — Request a magic-link email (public). */
+  requestMagicLink: (email: string, displayName: string) =>
+    api<{ ok: boolean; sent: boolean; devUrl?: string; error?: string }>("/auth/magic-link", {
+      method: "POST",
+      body: JSON.stringify({ email, displayName }),
+    }),
+
+  /** POST /auth/callback — Consume a magic-link token (public), returns session token. */
+  consumeMagicLink: (token: string) =>
+    api<{ ok: boolean; userId?: string; sessionToken?: string; email?: string; error?: string }>(
+      "/auth/callback",
+      { method: "POST", body: JSON.stringify({ token }) },
+    ),
+
   /** POST /export — Mint export bundle, upload ke S3. */
   exportBundle: (
     kinds: string[],

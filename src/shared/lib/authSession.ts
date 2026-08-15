@@ -14,5 +14,8 @@ export function getDeviceId(): string {
 export function getAuthHeaders(): { token: string; deviceId: string } | null {
   const profile = useAuthStore.getState().profile;
   if (!profile?.id) return null;
-  return { token: profile.id, deviceId: getDeviceId() };
+  // Prefer the server-issued session token (real identity) when available;
+  // fall back to the local profile id for legacy sessions.
+  const token = profile.sessionToken ?? profile.id;
+  return { token, deviceId: getDeviceId() };
 }

@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS users (
   display_name STRING NOT NULL,
   auth_method STRING NOT NULL CHECK (auth_method IN ('passkey', 'magic-link')),
   credential_id STRING,
+  session_token STRING,
   consent_version STRING,
   consent_accepted_at TIMESTAMPTZ,
   emergency_contact JSONB,
@@ -28,6 +29,22 @@ CREATE TABLE IF NOT EXISTS users (
   last_active TIMESTAMPTZ DEFAULT now(),
   INDEX users_email_idx (email),
   INDEX users_auth_method_idx (auth_method)
+);
+
+-- ─────────────────────────────────────────────
+-- Auth tokens (magic-link, single-use, short TTL)
+-- ─────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS auth_tokens (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email STRING NOT NULL,
+  token_hash STRING NOT NULL,
+  method STRING NOT NULL DEFAULT 'magic-link' CHECK (method IN ('magic-link')),
+  expires_at TIMESTAMPTZ NOT NULL,
+  used_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  INDEX auth_tokens_email_idx (email),
+  INDEX auth_tokens_hash_idx (token_hash)
 );
 
 -- ─────────────────────────────────────────────

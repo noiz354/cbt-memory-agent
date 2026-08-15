@@ -1,12 +1,20 @@
 import { CONSENT_VERSION, type AuthMethod, type AuthStatus, type EmergencyContact, type OnboardingStep, type SessionProfile } from "@/features/auth/types";
 import { useAuditStore } from "@/shared/store/auditStore";
 import { uid, secureToken } from "@/shared/lib/format";
+import { apiClient } from "@/shared/lib/apiClient";
 import { createVersionedPersist } from "@/shared/lib/versionedPersist";
 import type { TherapyGoal } from "@/shared/types";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 const MAGIC_LINK_TTL_MS = 10 * 60 * 1000;
+
+export interface MagicLinkIssueResult {
+  ok: boolean;
+  sent: boolean;
+  token: string | null;
+  error?: string;
+}
 
 interface AuthState {
   hydrated: boolean;
@@ -18,8 +26,8 @@ interface AuthState {
   magicTokenExpiresAt: number | null;
   setHydrated: (value: boolean) => void;
   setPendingEmail: (email: string) => void;
-  issueMagicLink: (email: string, displayName: string) => string;
-  consumeMagicLink: (token: string) => boolean;
+  issueMagicLink: (email: string, displayName: string) => Promise<MagicLinkIssueResult>;
+  consumeMagicLink: (token: string) => Promise<boolean>;
   completeAuth: (input: {
     email: string;
     displayName: string;
@@ -65,12 +73,9 @@ export const useAuthStore = create<AuthState>()(
       magicTokenExpiresAt: null,
       setHydrated: (hydrated) => set({ hydrated }),
       setPendingEmail: (pendingEmail) => set({ pendingEmail }),
-      issueMagicLink: (email, displayName) => {
-        const token = secureToken("lnk");
+      issueMagicLink: async (email, displayName) => {
         set({
           pendingEmail: email,
-          magicToken: token,
-          magicTokenExpiresAt: Date.now() + MAGIC_LINK_TTL_MS,
           profile: emptyProfile({
             email,
             displayName,
@@ -78,17 +83,64 @@ export const useAuthStore = create<AuthState>()(
             credentialId: null,
           }),
         });
-        return token;
+
+        try {
+          const res = await apiClient.requestMagicLink(email, displayName);
+          if (res.ok && res.sent) {
+            // Real email sent by the backend (Resend). No preview token available.
+            set({ magicToken: null, magicTokenExpiresAt: null });
+            return { ok: true, sent: true, token: null };
+          }
+          if (res.ok && res.devUrl) {
+            // Dev mode: backend has no RESEND_API_KEY, it returned a preview URL.
+            const url = new URL(res.devUrl);
+            const token = url.searchParams.get("token") ?? secureToken("lnk");
+            set({
+              magicToken: token,
+              magicTokenExpiresAt: Date.now() + MAGIC_LINK_TTL_MS,
+            });
+            return { ok: true, sent: false, token };
+          }
+          return {
+            ok: false,
+            sent: false,
+            token: null,
+            error: res.error ?? "Failed to request a magic link.",
+          };
+        } catch (err) {
+          return {
+            ok: false,
+            sent: false,
+            token: null,
+            error: err instanceof Error ? err.message : "Failed to request a magic link.",
+          };
+        }
       },
-      consumeMagicLink: (token) => {
-        const state = get();
-        if (!state.magicToken || state.magicToken !== token || !state.profile) return false;
-        if (state.magicTokenExpiresAt && Date.now() > state.magicTokenExpiresAt) {
+      consumeMagicLink: async (token) => {
+        try {
+          const res = await apiClient.consumeMagicLink(token);
+          if (!res.ok) {
+            set({ magicToken: null, magicTokenExpiresAt: null });
+            return false;
+          }
+          set((s) => ({
+            status: "authenticated",
+            magicToken: null,
+            magicTokenExpiresAt: null,
+            step: "disclosure",
+            profile: s.profile
+              ? {
+                  ...s.profile,
+                  email: res.email ?? s.profile.email,
+                  sessionToken: res.sessionToken ?? s.profile.sessionToken,
+                }
+              : s.profile,
+          }));
+          return true;
+        } catch {
           set({ magicToken: null, magicTokenExpiresAt: null });
           return false;
         }
-        set({ status: "authenticated", magicToken: null, magicTokenExpiresAt: null, step: "disclosure" });
-        return true;
       },
       completeAuth: (input) =>
         set({

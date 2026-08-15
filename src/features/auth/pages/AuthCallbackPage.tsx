@@ -20,11 +20,15 @@ export function AuthCallbackPage() {
     if (consumedRef.current) return;
     consumedRef.current = true;
 
+    const timerRef: { current: number | null } = { current: null };
+
     // Already authenticated (e.g. re-entry after the first consume) → success.
     if (status === "authenticated" || status === "onboarded") {
       setOk(true);
-      const timer = window.setTimeout(() => navigate("/onboarding"), 800);
-      return () => window.clearTimeout(timer);
+      timerRef.current = window.setTimeout(() => navigate("/onboarding"), 800);
+      return () => {
+        if (timerRef.current) window.clearTimeout(timerRef.current);
+      };
     }
 
     const token = params.get("token");
@@ -32,12 +36,16 @@ export function AuthCallbackPage() {
       setOk(false);
       return;
     }
-    const accepted = consumeMagicLink(token);
-    setOk(accepted);
-    if (accepted) {
-      const timer = window.setTimeout(() => navigate("/onboarding"), 800);
-      return () => window.clearTimeout(timer);
-    }
+    void (async () => {
+      const accepted = await consumeMagicLink(token);
+      setOk(accepted);
+      if (accepted) {
+        timerRef.current = window.setTimeout(() => navigate("/onboarding"), 800);
+      }
+    })();
+    return () => {
+      if (timerRef.current) window.clearTimeout(timerRef.current);
+    };
   }, [consumeMagicLink, navigate, params, status]);
 
   return (

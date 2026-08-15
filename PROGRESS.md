@@ -187,3 +187,15 @@ Semua item Phase A (on-device) + Phase B (no-UI features) dari `docs/15-8-26/WOR
 - [x] **2.3 Metrics page + /metrics real** — `handleMetrics` query real (sessions/memory/chat_turns/audit_events per-user); halaman `/metrics` baru + nav "Metrics"
 - [x] **2.4 S3 export real** — `handleExport` kumpulkan bundle (sessions/memories/edges/turns/audit) → `s3.uploadExport` (presigned URL); `ExportBuilder` tombol "Upload to S3" wire `uploadExportBundle` (sebelumnya dead code)
 - [ ] **Masih terbuka** (Phase C/D): real authN/authZ, passkey `credentials.get()`, rewrite copy privasi, rate limit + server audit, `ALLOWED_ORIGIN` ter-set, CSP + code splitting, re-run Lighthouse prod build
+
+## Phase C: Resend magic-link (2026-08-15)
+
+Magic-link email via Resend — server-backed auth, resolves WORK-LIST 3.2 (real token verification).
+
+- **Schema** (`schema/crdb-schema.sql`): new `auth_tokens` table (email, token_hash SHA-256, method='magic-link', expires_at 10min, used_at single-use) + `users.session_token` column
+- **Backend** (`lambda/handlers/auth.ts` baru): `POST /api/v1/auth/magic-link` (public) — 32B `crypto.randomBytes` token, simpan hash, kirim email via Resend (plain fetch, tanpa SDK); `POST /api/v1/auth/callback` — verifikasi hash/expiry/reuse, upsert `users` dengan `session_token` baru, kembalikan ke frontend. Dev mode tanpa `RESEND_API_KEY` → `{ok:true,sent:false,devUrl}` (on-device preview tetap jalan)
+- **Routing** (`lambda/handler.ts`): kedua route auth public (skip middleware); `validateAuth` kini async + `SELECT id FROM users WHERE session_token=$1` → identity dari DB (bukan client). Legacy `profile.id` tetap lolos via fallback
+- **Frontend**: `apiClient.requestMagicLink/consumeMagicLink` (public); `authStore.issueMagicLink/consumeMagicLink` async (server-first, fallback local dev); `getAuthHeaders` pakai `profile.sessionToken ?? profile.id`; `SessionProfile.sessionToken?`; `MagicLinkForm` state loading/sent/dev-preview; `AuthCallbackPage` server verify
+- **Config**: `RESEND_API_KEY` + `EMAIL_FROM=onboarding@resend.dev` di `.env` (git-ignored) + placeholder di `.env.example`. **Tidak pernah di-commit**
+- **Cost** (verified): ≤100 email/bulan ≈ $0 (Resend free tier 3k/mo, Lambda free tier). 1 email = 1 invokasi Lambda (~$0) + 1 email Resend
+- **⚠ Deployment belum dilakukan**: Lambda live belum punya `RESEND_API_KEY` + schema baru — butuh `aws login --profile aws-x-cdb`, apply schema, redeploy. Sampai saat itu perilaku live = dev-mode preview
