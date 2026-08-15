@@ -13,6 +13,7 @@
 import type { LLMProviderId } from "@/shared/lib/llmRegistry";
 import { getProvider, getModel } from "@/shared/lib/llmRegistry";
 import { getApiKey } from "@/shared/lib/byokKeyManager";
+import { getAuthHeaders } from "@/shared/lib/authSession";
 
 // ─────────────────────────────────────────────
 // Types
@@ -151,18 +152,14 @@ export async function callLLMWithFallback(
 async function callOnDeviceLLM(
   _request: LLMRequest,
   _onStream: LLMStreamCallback | undefined,
-  started: number,
+  _started: number,
 ): Promise<LLMResponse> {
   // TODO: Integrasikan @mlc-ai/web-llm saat model di-load.
-  // Untuk sekarang, return placeholder response.
-  // Ini akan diganti saat WebLLM di-setup di P1.
-
-  return {
-    content: "On-device LLM (WebLLM) belum di-load. Ini adalah placeholder untuk fallback chain.",
-    providerId: "local-webllm",
-    modelId: "Phi-3-mini-4k-instruct-q4f16_1-MLC",
-    latencyMs: Date.now() - started,
-  };
+  // Fail-closed: WebLLM belum tersedia, jadi THROW agar fallback chain
+  // (backend-proxy → BYOK) benar-benar dijalankan. Sebelumnya fungsi ini
+  // "sukses" dengan placeholder → placeholder selalu menang dan backend tidak
+  // pernah dijangkau, plus isStreaming macet selamanya (onStream tak pernah dipanggil).
+  throw new Error("WebLLM belum di-load. On-device provider tidak tersedia — fallback ke backend.");
 }
 
 // ─────────────────────────────────────────────
@@ -177,17 +174,32 @@ async function callBackendProxy(
   const provider = getProvider("backend-proxy");
   const url = `${provider.baseUrl}${provider.apiPath}`;
 
+  const auth = getAuthHeaders();
+  if (!auth) {
+    throw new Error("Not authenticated — backend proxy requires an active session");
+  }
+
+  // Backend (Lambda Function URL) berbicara SSE `data: {"t":"..."}` pada
+  // POST /api/v1/chat/turn, bukan OpenAI-format /chat/completions.
   const body = {
-    model: request.modelId,
-    messages: request.messages,
-    temperature: request.temperature,
-    max_tokens: request.maxTokens,
-    stream: request.stream,
+    v: 1,
+    sessionId: `proxy_${Date.now()}`,
+    userMessage: request.messages
+      .filter((m) => m.role === "user")
+      .map((m) => m.content)
+      .join("\n"),
+    memoryIds: [],
+    clientTs: new Date().toISOString(),
+    deviceOnly: true,
   };
 
   const response = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${auth.token}`,
+      "X-Device-Id": auth.deviceId,
+    },
     body: JSON.stringify(body),
   });
 
@@ -195,7 +207,69 @@ async function callBackendProxy(
     throw new Error(`Backend proxy returned ${response.status}: ${response.statusText}`);
   }
 
-  return parseChatResponse(response, "backend-proxy", request.modelId, onStream, started);
+  return parseBackendProxySSE(response, onStream, started);
+}
+
+async function parseBackendProxySSE(
+  response: Response,
+  onStream: LLMStreamCallback | undefined,
+  started: number,
+): Promise<LLMResponse> {
+  if (onStream && response.body) {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let fullContent = "";
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split("\n");
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed === "data: [DONE]") {
+            onStream({ delta: "", done: true });
+            return {
+              content: fullContent,
+              providerId: "backend-proxy",
+              modelId: "gpt-4o-mini",
+              latencyMs: Date.now() - started,
+            };
+          }
+          if (!trimmed.startsWith("data: ")) continue;
+          try {
+            const json = JSON.parse(trimmed.slice(6));
+            const delta = json.t ?? "";
+            if (delta) {
+              fullContent += delta;
+              onStream({ delta, done: false });
+            }
+          } catch {
+            // Skip malformed SSE lines
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+
+    onStream({ delta: "", done: true });
+    return {
+      content: fullContent,
+      providerId: "backend-proxy",
+      modelId: "gpt-4o-mini",
+      latencyMs: Date.now() - started,
+    };
+  }
+
+  const text = await response.text();
+  return {
+    content: text,
+    providerId: "backend-proxy",
+    modelId: "gpt-4o-mini",
+    latencyMs: Date.now() - started,
+  };
 }
 
 // ─────────────────────────────────────────────

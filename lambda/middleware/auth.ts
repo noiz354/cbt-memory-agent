@@ -20,9 +20,17 @@ export function validateAuth(token: string, deviceId: string): AuthResult {
     return { valid: false, error: "Missing X-Device-Id header", statusCode: 401 };
   }
 
-  // TODO: Validate token against CRDB users table
-  // For now, accept any non-empty token
-  // Production: SELECT id FROM users WHERE id = $1 AND credential_id = $2
+  // TODO (production): Validate token against CRDB users table — verify a
+  // server-issued high-entropy session token bound to the user's row:
+  //   SELECT id FROM users WHERE id = $1 AND session_token = $2
+  // and bind `userId` from the DB row, never from the client-supplied token.
+  // Until then, fail-closed on obviously-malformed tokens instead of accepting
+  // any non-empty string. A minimal shape check reduces accidental breakage
+  // (e.g. a bare profile.id without our `usr_` prefix) without a full rewrite.
+  if (token.length < 8 || /\s/.test(token)) {
+    return { valid: false, error: "Malformed Authorization token", statusCode: 401 };
+  }
 
+  // Accept for now (hackathon) — see TODO above.
   return { valid: true, userId: token };
 }

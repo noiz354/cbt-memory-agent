@@ -96,6 +96,7 @@ export function Composer() {
           <input
             type="file"
             accept=".pdf,.txt,application/pdf,text/plain"
+            aria-label="Attach files"
             className="sr-only"
             multiple
             onChange={(e) => {

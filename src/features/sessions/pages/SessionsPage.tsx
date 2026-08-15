@@ -6,6 +6,7 @@ import { useSessionStore } from "@/features/sessions/store/sessionStore";
 import type { SessionView } from "@/features/sessions/types";
 import { cn } from "@/shared/lib/cn";
 import { springDropAnimation } from "@/shared/lib/dnd";
+import { BackendSyncStatus } from "@/shared/ui/BackendSyncStatus";
 import type { SessionStatus } from "@/shared/types";
 import {
   DndContext,
@@ -32,6 +33,10 @@ export function SessionsPage() {
   const openCompare = useSessionStore((s) => s.openCompare);
   const retryInterrupted = useSessionStore((s) => s.retryInterrupted);
   const sessions = useSessionStore((s) => s.sessions);
+  const hydrate = useSessionStore((s) => s.hydrate);
+  const hydrated = useSessionStore((s) => s.hydrated);
+  const hydrating = useSessionStore((s) => s.hydrating);
+  const hydrateError = useSessionStore((s) => s.hydrateError);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
@@ -98,6 +103,7 @@ export function SessionsPage() {
               <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value as "all" | SessionStatus)}
+                aria-label="Filter sessions by status"
                 className="h-9 rounded-xl border border-line bg-white px-2 text-sm"
               >
                 <option value="all">All statuses</option>
@@ -130,12 +136,36 @@ export function SessionsPage() {
           </p>
         )}
 
+        <BackendSyncStatus
+          className="mb-3"
+          hydrating={hydrating}
+          hydrateError={hydrateError}
+          empty={false}
+          emptyTitle=""
+          emptyHint=""
+          onRetry={() => void hydrate()}
+        />
+
         <div className="mb-4 grid gap-3 lg:grid-cols-[1fr_14rem]">
           <MoodSparkline />
           <KpiCard />
         </div>
 
-        {view === "kanban" ? <KanbanBoard /> : <TimelineView />}
+        {hydrated && sessions.length === 0 ? (
+          <BackendSyncStatus
+            className="mt-4"
+            hydrating={false}
+            hydrateError={null}
+            empty
+            emptyTitle="No sessions yet"
+            emptyHint="Completed therapy sessions will show up here — synced to CockroachDB. Each session trace captures mood, thought, and reframe."
+            onRetry={() => void hydrate()}
+          />
+        ) : (
+          <>
+            {view === "kanban" ? <KanbanBoard /> : <TimelineView />}
+          </>
+        )}
         {toast && (
           <div className="fixed bottom-8 left-1/2 z-40 -translate-x-1/2 rounded-full bg-ink px-4 py-2 text-xs font-semibold text-white">
             {toast}

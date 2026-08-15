@@ -41,7 +41,7 @@ export function MagicLinkForm({ email, displayName }: MagicLinkFormProps) {
             transition={{ type: "spring", stiffness: 300, damping: 25 }}
             className="glass mt-4 rounded-2xl p-4"
           >
-            <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-teal">
+            <p className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-teal-700">
               <Inbox className="size-3.5" />
               On-device inbox preview
             </p>

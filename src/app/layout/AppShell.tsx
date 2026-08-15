@@ -7,8 +7,11 @@ import { OfflineBanner } from "@/shared/ui/OfflineBanner";
 import { TabSync } from "@/shared/ui/TabSync";
 import { ToastHost } from "@/shared/ui/ToastHost";
 import { Outlet } from "react-router-dom";
+import { useBackendSync } from "@/shared/hooks/useBackendSync";
 
 export function AppShell() {
+  useBackendSync();
+
   return (
     <div className="flex h-[100dvh] overflow-hidden bg-canvas">
       <Sidebar />

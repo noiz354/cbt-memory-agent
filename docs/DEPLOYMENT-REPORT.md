@@ -79,6 +79,13 @@ ssm_parameters     = { ccloud_api_key, cluster_id, crdb_url, daily_cap, pepper �
    - Patch `lambda/handler.ts` agar mendukung payload v2.0 (Function URL / HTTP API).
    - `scripts/build-lambda.sh` → zip baru → `terraform apply` (hanya update lambda).
 8. **Verifikasi end-to-end** (lihat bagian 4) — success flow `200` via URL publik.
+9. **Integrasi frontend-backend** (2026-08-14):
+   - Implementasi handler memory & session **real** (CRUD CockroachDB) di `lambda/handlers/`.
+   - Fix FK write: `getUserId()` kini `ensureUser` (`INSERT INTO users ON CONFLICT DO NOTHING`).
+   - Read-side `hydrate()` di `memoryStore` + `sessionStore` (server wins; empty server = empty state).
+   - Vite dev proxy `/api/v1` → Function URL (via `VITE_PROXY_TARGET` di `.env`).
+   - LLM `backend-proxy` diarahkan ke `/api/v1/chat/turn` (SSE) — fallback chain kini sehat.
+   - Build zip → `terraform apply` (update lambda) → verifikasi roundtrip memory/session (lihat #4).
 
 ---
 
@@ -98,6 +105,12 @@ ssm_parameters     = { ccloud_api_key, cluster_id, crdb_url, daily_cap, pepper �
 | CloudWatch log stream | ✅ Ada — membuktikan invoke masuk |
 | Resource-based policy (2 statement) | ✅ `lambda:InvokeFunctionUrl` + `lambda:InvokeFunction` (InvokedViaFunctionUrl=true) |
 | `terraform plan` (idempotency) | ✅ Tidak ada diff yang tak diinginkan |
+| **Memory write** `POST /api/v1/memory` (upsert node) | ✅ **HTTP 200** `{"v":1,"ok":true,"id":"..."}` |
+| **Memory read** `GET /api/v1/memory` | ✅ **HTTP 200** node+edges dari CockroachDB (typed: `weight:0.7`, `references:0`) |
+| **Memory delete** `DELETE /api/v1/memory/:id` | ✅ HTTP 200 (edge ter-cascade) |
+| **Session write** `POST /api/v1/session` | ✅ **HTTP 200** `{"v":1,"ok":true,"id":"..."}` |
+| **Session read** `GET /api/v1/sessions` | ✅ **HTTP 200** daftar session dari CockroachDB (typed: `mood:7`) |
+| **Vite dev proxy** `localhost:5173/api/v1/*` | ✅ HTTP 200 — proxy ke Function URL (health/memory roundtrip) |
 
 ---
 
@@ -236,6 +249,34 @@ Lalu rebuild (`scripts/build-lambda.sh`) dan redeploy via terraform (hanya updat
 4. **Modul `apigw` di repo ini punya masalah yang sama** (HTTP API v2.0) — tidak dipakai,
    tapi bila diaktifkan harus tetap lewat handler yang sudah di-patch.
 
+### Insiden #5 — Write memory/session gagal 500 (FK `user_id`), read 200
+
+**Gejala:** Setelah handler memory/session ditulis real (CRUD CRDB), `GET /api/v1/memory`
+dan `GET /api/v1/sessions` sukses 200, tapi `POST /api/v1/memory` (upsert node/edge) dan
+`POST /api/v1/session` gagal **HTTP 500** `{"error":"Failed to save memory/session"}`.
+CloudWatch: `violates foreign key constraint ..._user_id_fkey` — `user_id` tidak ada di tabel `users`.
+
+**Root cause:** Handler `handleUpsertMemory`/`handleSaveSession` langsung `INSERT` ke
+`memory_nodes`/`sessions` dengan `user_id = md5(token)::uuid`, tapi row `users` untuk UUID itu
+belum pernah dibuat (di `chatTurn` user di-`upsert` sebelum menulis). Read tidak kena karena
+tidak ada FK check pada `SELECT`.
+
+**Resolusi:** `getUserId()` di `lambda/handlers/memory.ts` dan `session.ts` kini men-`INSERT INTO
+users (id, email, display_name, auth_method) VALUES (md5(token)::uuid, token, 'device-user',
+'passkey') ON CONFLICT (id) DO NOTHING` sebelum menulis — pola sama dengan `upsertUser()` di
+`chatTurn.ts`. Sekaligus `toNode()`/`toSession()` diberi koersi `Number(...)`/`!!` karena
+CockroachDB mengembalikan INT/BOOL sebagai **string** via pg (`references:"0"`, `mood:"7"`) yang
+akan merusak tipe numerik di frontend.
+
+**Pelajaran:**
+1. **FK constraint tidak hanya soal relasi — harus ada row parent-nya.** Token sebarang bisa
+   menjadi `user_id` yang valid secara format tapi belum tentu ada di `users`. Selalu `ensureUser`
+   pada path write.
+2. **Read vs write punya jalur error berbeda** — GET sukses ≠ POST pasti sukses. Selalu tes
+   roundtrip (tulis → baca → hapus), bukan cuma baca.
+3. **CockroachDB lewat pg driver mengembalikan numerik/bool sebagai string.** Koersikan eksplisit
+   di boundary JSON (`Number()`, `!!`) agar tipe kontrak API stabil.
+
 ---
 
 ## 6. Rollback Plan
@@ -264,6 +305,10 @@ tidak ikut ter-destroy.
 - [x] CloudWatch dashboard + log group aktif (retensi 7 hari)
 - [x] Provider upgraded 5.100.0 → 6.60.0, plan bersih
 - [x] 26 resource di state, tidak ada drift
+- [x] **Memory roundtrip real** (upsert → list → delete) → HTTP 200 semua, data di CockroachDB
+- [x] **Session roundtrip real** (save → list) → HTTP 200 semua, tipe numerik ter-koersi (`mood:7`)
+- [x] **Vite dev proxy** `localhost:5173/api/v1/*` → Function URL → HTTP 200
+- [x] Integrasi frontend: read-side hydrate aktif (server wins), empty states benar, LLM backend-proxy sehat
 
 **Deployer:** Norman (AWS SSO `AdministratorAccess`, profile bridge `aws-x-cdb-terraform`)
 **Status:** ✅ **SUCCESS** — deployment diterima untuk keperluan hackathon.

@@ -123,8 +123,14 @@ export async function handler(
 }
 
 function corsHeaders(): Record<string, string> {
+  const origin = process.env.ALLOWED_ORIGIN;
+  if (!origin) {
+    // Fail-loud: never silently deploy with wildcard CORS. If ALLOWED_ORIGIN is
+    // missing we still respond (hackathon default) but log so it can't be missed.
+    console.warn("[cors] ALLOWED_ORIGIN is not set — falling back to '*' (set it in production)");
+  }
   return {
-    "Access-Control-Allow-Origin": process.env.ALLOWED_ORIGIN ?? "*",
+    "Access-Control-Allow-Origin": origin ?? "*",
     "Access-Control-Allow-Headers": "Content-Type,Authorization,X-Device-Id",
     "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
     "Access-Control-Max-Age": "86400",

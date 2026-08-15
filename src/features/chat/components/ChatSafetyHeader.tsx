@@ -48,9 +48,7 @@ export function ChatSafetyHeader() {
   return (
     <div className="flex flex-wrap items-center justify-end gap-2">
       <Badge tone="teal">CBT Master · on-device</Badge>
-      <Badge>
-        {typeof navigator !== "undefined" && "gpu" in navigator ? "WebGPU TTS" : "WASM audio"}
-      </Badge>
+      <Badge>TTS pending</Badge>
       <Badge>
         Sesi · {mm}:{ss}
       </Badge>

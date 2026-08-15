@@ -11,12 +11,16 @@ interface SessionState {
   sessions: TherapySession[];
   highlightedId: string | null;
   compare: [string, string] | null;
+  hydrated: boolean;
+  hydrating: boolean;
+  hydrateError: string | null;
   setStatus: (id: string, status: SessionStatus) => void;
   highlight: (id: string | null) => void;
   openCompare: (a: string, b: string) => void;
   closeCompare: () => void;
   retryInterrupted: () => number;
   addSession: (session: Omit<TherapySession, "id">) => void;
+  hydrate: () => Promise<void>;
   query: string;
   statusFilter: "all" | SessionStatus;
   setQuery: (query: string) => void;
@@ -105,6 +109,42 @@ export const useSessionStore = create<SessionState>()(
       sessions: seed,
       highlightedId: null,
       compare: null,
+      hydrated: false,
+      hydrating: false,
+      hydrateError: null,
+      hydrate: async () => {
+        const auth = getAuthHeaders();
+        if (!auth || get().hydrating) return;
+        set({ hydrating: true, hydrateError: null });
+        try {
+          const data = await apiClient.listSessions(auth.token, auth.deviceId);
+          set({
+            sessions: data.sessions.map((s) => ({
+              id: s.id,
+              title: s.title,
+              status: s.status,
+              mood: s.mood,
+              moodLabel: s.moodLabel,
+              startedAt: s.startedAt,
+              durationMin: s.durationMin,
+              excerpt: s.excerpt,
+              thought: s.thought,
+              reframe: s.reframe,
+            })),
+            hydrated: true,
+            hydrating: false,
+          });
+        } catch (err) {
+          // FAIL-CLOSED: drop the demo seed on hydrate failure so fabricated
+          // sessions aren't presented as real history. Empty state is honest.
+          set({
+            sessions: [],
+            hydrated: true,
+            hydrating: false,
+            hydrateError: err instanceof Error ? err.message : "Failed to load sessions",
+          });
+        }
+      },
       setStatus: (id, status) =>
         set((s) => ({
           sessions: s.sessions.map((session) => (session.id === id ? { ...session, status } : session)),

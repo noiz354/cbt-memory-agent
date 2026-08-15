@@ -113,8 +113,7 @@ export function DestructionKey() {
       const ratio = Math.min(1, (now - timer.start) / HOLD_MS);
       setProgress(ratio);
       if (ratio >= 1) {
-        hardPurgeLocalData();
-        navigate("/auth");
+        void hardPurgeLocalData().finally(() => navigate("/auth"));
         return;
       }
       timer.raf = requestAnimationFrame(tick);

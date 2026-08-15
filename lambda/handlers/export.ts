@@ -15,14 +15,19 @@ export async function handleExport(
   token: string,
   deviceId: string,
 ): Promise<APIGatewayProxyResult> {
-  // TODO: Implement
+  // Not implemented. Return 501 so clients know this endpoint is unavailable —
+  // previously it returned 200 with a fabricated s3Url, a silent false-success
+  // that advertised a capability the app doesn't have.
   return {
-    statusCode: 200,
+    statusCode: 501,
+    headers: {
+      "Access-Control-Allow-Origin": process.env.ALLOWED_ORIGIN ?? "*",
+      "Content-Type": "application/json",
+    },
     body: JSON.stringify({
       v: 2,
-      exportedAt: new Date().toISOString(),
-      s3Url: "https://s3.amazonaws.com/...",
-      expiresAt: new Date(Date.now() + 86400000).toISOString(),
+      ok: false,
+      error: "Export upload is not implemented.",
     }),
   };
 }

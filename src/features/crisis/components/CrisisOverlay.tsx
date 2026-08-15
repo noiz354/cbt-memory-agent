@@ -129,7 +129,7 @@ export function CrisisOverlay() {
                 useAuditStore.getState().log("CRISIS_DISMISSED", "user marked safe after grounding");
                 dismissCrisis();
               }}
-              className="mb-4 self-center text-sm font-semibold text-white/45 hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+              className="mb-4 self-center text-sm font-semibold text-white/60 hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
             >
               {grounded
                 ? "I am safe for now — return to the workspace"

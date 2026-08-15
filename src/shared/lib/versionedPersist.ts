@@ -31,6 +31,17 @@ export function createVersionedPersist<State, PersistedSlice>(opts: {
       version: STORE_VERSION,
       data: partialize(state),
     }),
+    // CRITICAL FIX: Zustand persist default merge is `{ ...currentState, ...persistedState }`,
+    // which only merges the top-level wrapper keys {version, data} — the real slice
+    // (status/profile/step, nodes, sessions, ...) lives inside `data` and was never
+    // unpacked, so nothing ever restored from storage (e.g. auth always rehydrated as
+    // 'anonymous' after reload). This merge unpacks `persisted.data` into the store.
+    merge: (persistedState, currentState) => {
+      if (!persistedState) return currentState;
+      const wrapped = persistedState as { version?: number; data?: PersistedSlice };
+      const slice = wrapped && "data" in wrapped ? wrapped.data : (persistedState as unknown as PersistedSlice);
+      return { ...currentState, ...(slice as Partial<State>) };
+    },
     onRehydrateStorage: () => (restored) => {
       const wrapped = restored as { version?: number; data?: PersistedSlice } | undefined;
 

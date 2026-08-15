@@ -523,8 +523,8 @@ export const PROVIDERS: Record<LLMProviderId, LLMProvider> = {
   "backend-proxy": {
     id: "backend-proxy",
     name: "Backend Proxy",
-    baseUrl: "/api",
-    apiPath: "/v1/chat/completions",
+    baseUrl: "",
+    apiPath: "/api/v1/chat/turn",
     authType: "api-key",
     authHeader: "",
     authPrefix: "",

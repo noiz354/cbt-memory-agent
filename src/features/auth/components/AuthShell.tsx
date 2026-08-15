@@ -28,7 +28,7 @@ export function AuthShell({ eyebrow, title, lede, children, wide = false }: Auth
             </div>
             <div>
               <p className="font-display text-sm font-bold">CBT Memory Agent</p>
-              <p className="text-[11px] text-white/45">Clinical workspace · 2026</p>
+              <p className="text-[11px] text-white/60">Clinical workspace · 2026</p>
             </div>
           </div>
           <h2 className="mt-16 max-w-sm font-display text-4xl font-extrabold leading-[1.1] tracking-tight">
@@ -57,11 +57,11 @@ export function AuthShell({ eyebrow, title, lede, children, wide = false }: Auth
       <main className="flex flex-1 items-center justify-center px-4 py-10">
         <div className={cn("w-full", wide ? "max-w-3xl" : "max-w-md")}>
           <div className="mb-6 lg:hidden">
-            <p className="font-display text-xs font-bold uppercase tracking-[0.2em] text-teal">
+            <p className="font-display text-xs font-bold uppercase tracking-[0.2em] text-teal-700">
               CBT Memory Agent
             </p>
           </div>
-          <p className="font-display text-[11px] font-bold uppercase tracking-[0.2em] text-teal">
+          <p className="font-display text-[11px] font-bold uppercase tracking-[0.2em] text-teal-700">
             {eyebrow}
           </p>
           <h1 className="mt-2 font-display text-3xl font-extrabold tracking-tight text-ink">{title}</h1>

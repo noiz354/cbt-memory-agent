@@ -1,10 +1,12 @@
 import { CONSENT_VERSION, type AuthMethod, type AuthStatus, type EmergencyContact, type OnboardingStep, type SessionProfile } from "@/features/auth/types";
 import { useAuditStore } from "@/shared/store/auditStore";
-import { uid } from "@/shared/lib/format";
+import { uid, secureToken } from "@/shared/lib/format";
 import { createVersionedPersist } from "@/shared/lib/versionedPersist";
 import type { TherapyGoal } from "@/shared/types";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+
+const MAGIC_LINK_TTL_MS = 10 * 60 * 1000;
 
 interface AuthState {
   hydrated: boolean;
@@ -13,6 +15,7 @@ interface AuthState {
   step: OnboardingStep;
   pendingEmail: string;
   magicToken: string | null;
+  magicTokenExpiresAt: number | null;
   setHydrated: (value: boolean) => void;
   setPendingEmail: (email: string) => void;
   issueMagicLink: (email: string, displayName: string) => string;
@@ -59,13 +62,15 @@ export const useAuthStore = create<AuthState>()(
       step: "disclosure",
       pendingEmail: "",
       magicToken: null,
+      magicTokenExpiresAt: null,
       setHydrated: (hydrated) => set({ hydrated }),
       setPendingEmail: (pendingEmail) => set({ pendingEmail }),
       issueMagicLink: (email, displayName) => {
-        const token = uid("lnk");
+        const token = secureToken("lnk");
         set({
           pendingEmail: email,
           magicToken: token,
+          magicTokenExpiresAt: Date.now() + MAGIC_LINK_TTL_MS,
           profile: emptyProfile({
             email,
             displayName,
@@ -78,7 +83,11 @@ export const useAuthStore = create<AuthState>()(
       consumeMagicLink: (token) => {
         const state = get();
         if (!state.magicToken || state.magicToken !== token || !state.profile) return false;
-        set({ status: "authenticated", magicToken: null, step: "disclosure" });
+        if (state.magicTokenExpiresAt && Date.now() > state.magicTokenExpiresAt) {
+          set({ magicToken: null, magicTokenExpiresAt: null });
+          return false;
+        }
+        set({ status: "authenticated", magicToken: null, magicTokenExpiresAt: null, step: "disclosure" });
         return true;
       },
       completeAuth: (input) =>
@@ -86,6 +95,7 @@ export const useAuthStore = create<AuthState>()(
           status: "authenticated",
           step: "disclosure",
           magicToken: null,
+          magicTokenExpiresAt: null,
           profile: emptyProfile(input),
         }),
       setStep: (step) => set({ step }),
@@ -139,6 +149,7 @@ export const useAuthStore = create<AuthState>()(
           step: "disclosure",
           pendingEmail: "",
           magicToken: null,
+          magicTokenExpiresAt: null,
         }),
     }),
     createVersionedPersist<AuthState, { status: AuthStatus; profile: SessionProfile | null; step: OnboardingStep }>({

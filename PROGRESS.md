@@ -129,16 +129,42 @@ Keputusan: LLM inference + embeddings dipindah total dari Amazon Bedrock ke Open
 - [x] OpenRouter API verified: `baai/bge-m3` = 1024-dim (free), `openrouter/free` router streaming OK, `/credits` HTTP 200
 - [x] **DEPLOY DONE**: build zip (207KB) + `terraform apply` (SSM `/hackathon/openrouter/api-key` + env `OPENROUTER_API_KEY`, bedrock policy dihapus)
 - [x] **Invoke test PASS**: health `{"status":"ok","crdb":"connected","llm":"available","s3":"available"}`; chat/turn → SSE stream CBT response (tokensUsed 606, chat_turns + sessions + users tersimpan di CRDB); semantic → `{"v":1,"results":[]}` (200, embeddings kosong — memory upsert masih stub)
-- [ ] **TODO:** Implement `handleUpsertMemory` (simpan node + embedding) agar semantic search punya data
+- [x] **DONE**: `handleUpsertMemory` + `handleDeleteMemory` real (CRDB), FK user di-ensure saat write
+- [x] **INTEGRASI FRONTEND-BACKEND (2026-08-14)**: handler memory/session real (list/upsert/delete CRDB); read-side hydrate di memoryStore + sessionStore (server wins, empty server = empty state); `BackendSyncStatus` komponen (loading/error/empty); `OfflineBanner` health probe; Vite dev proxy `/api/v1` → Function URL; LLM `backend-proxy` diarahkan ke `/api/v1/chat/turn` (SSE); semua endpoint terverifikasi 200 via curl langsung + lewat proxy `localhost:5173`
 
 ## Migrasi Region us-east-1 → ap-southeast-3 (2026-08-14)
 
 Keputusan: **semua resource AWS dipindah ke ap-southeast-3** agar Lambda berada dekat dengan cluster CRDB `woozy-grivet` (ap-southeast-3) — menghindari cross-region hop. Setelah migrasi OpenRouter (region-agnostic), tidak ada alasan lagi bertahan di us-east-1.
 
-- [ ] Bootstrap state infra baru di ap-southeast-3: S3 `cbt-memory-agent-terraform-state-apse3` + DynamoDB `cbt-memory-agent-terraform-lock-apse3`
-- [ ] Update backend.tf/main.tf + default region variables (ap-southeast-3)
-- [ ] `terraform init -migrate-state` → pindahkan state
-- [ ] Update `lambda/lib/s3.ts` (region-aware), scripts, CI deploy.yml, docs
-- [ ] `terraform apply` → destroy us-east-1, create ap-southeast-3
-- [ ] Verifikasi health/chat/semantic di region baru + recheck 403
+- [x] Bootstrap state infra baru di ap-southeast-3: S3 `cbt-memory-agent-terraform-state-apse3` + DynamoDB `cbt-memory-agent-terraform-lock-apse3`
+- [x] Update backend.tf/main.tf + default region variables (ap-southeast-3)
+- [x] `terraform init -migrate-state` → pindahkan state
+- [x] Update `lambda/lib/s3.ts` (region-aware), scripts, CI deploy.yml, docs
+- [x] `terraform apply` → destroy us-east-1, create ap-southeast-3
+- [x] Verifikasi health/chat/semantic di region baru + recheck 403
 - [ ] Bersihkan resource us-east-1 yang ter-orphan
+
+## Audit Komprehensif (2026-08-15)
+
+Audit fitur, kualitas web (Lighthouse), dan keamanan selesai. Dokumen lengkap di `docs/15-8-26/`.
+
+- [x] **AUDIT.md** — status tiap fitur: REAL / PARTIAL / STUB / DEAD / BROKEN / FAKE (chat, sessions, memory, auth, crisis, privacy, Lambda stubs)
+- [x] **WEB-QUALITY-AUDIT.md** — Lighthouse 13.4.1: `/auth` perf 57/a11y 92/BP 100/SEO 91; authed pages a11y 90–96, BP 100, SEO 80. Temuan utama: kontras `text-white/40` gagal 4.5:1 di sidebar semua halaman; file input & `<select>` tanpa label; `robots.txt` belum ada. (Angka perf adalah dev-server; re-run prod build.)
+- [x] **SECURITY-AUDIT.md** — backend menerima token non-empty apa pun (tanpa authN/authZ); token = `profile.id` (Math.random); sesi tidak bertahan reload (persist rehydration bug); magic-link double-consume; passkey tanpa `credentials.get()`; copy "never leaves this device" bertentangan dengan upload CRDB; hard purge tidak hapus IndexedDB BYOK keys & data server; CORS default `*`; `/purge` `/export` stub.
+- [x] **Bug kunci terverifikasi di browser**: (1) persist auth tidak restore `status/profile` setelah reload → `/chat` → `/auth`; (2) magic-link "Link not valid" padahal sudah autentik (double-consume `params` di deps effect). Workaround masuk app: `/auth` → magic link → "Open magic link" → "Return to sign in" → onboarding → `/chat`.
+- [x] `npm run typecheck` PASS setelah audit (audit tidak mengubah source).
+
+## Remediasi Audit (2026-08-15) — implementasi fix order
+
+Fix dari AUDIT/WEB-QUALITY/SECURITY diimplementasikan; `npm run typecheck` (frontend) + `npx tsc --noEmit` (lambda) PASS.
+
+- [x] **LLM fallback short-circuit** — `callOnDeviceLLM` sekarang `throw` saat WebLLM belum di-load (`llmClient.ts:162`) → chain backend-proxy→openrouter benar-benar jalan, stuck streaming hilang
+- [x] **Auth persist rehydration** — `versionedPersist.ts:39-42` custom `merge` unpack `persistedState.data` → `status/profile` restore lintas reload
+- [x] **Magic-link hardening** — `secureToken()` (32B `crypto.getRandomValues`, base64url, `format.ts:25`); TTL 10 menit (`magicTokenExpiresAt`); `AuthCallbackPage` run-once `consumedRef` + treat-already-authenticated-as-success → bug "Link not valid" hilang
+- [x] **A11y** — kontras `text-white/40→/60`, `text-white/45→/60`, teal→`teal-700`; `aria-label` file input (`Composer.tsx:97`) + `<select>` filter (`SessionsPage.tsx:103`); `public/robots.txt`
+- [x] **TTS badge** — `ChatSafetyHeader.tsx:51` kini jujur `TTS pending` (bukan deteksi `"gpu" in navigator`)
+- [x] **Hard purge** — `hardPurgeLocalData` async: `wipeAllApiKeys()` + `apiClient.purge("hard-purge", …)` + toast gagal; `DestructionKey` navigate setelah selesai
+- [x] **Backend** — `purge.ts` real (confirmation-gated per-user `DELETE` semua tabel via `crdb.executeCount`); `export.ts` → 501; `auth.ts` tolak token malformed (len<8/whitespace); CORS fail-loud warn saat `ALLOWED_ORIGIN` kosong
+- [x] **Empty state hydrate gagal** — `memoryStore`/`sessionStore` set `[]` + `hydrateError` (bukan seed sebagai data asli)
+- [x] **Dokumen audit diperbarui** menandai status fix (AUDIT.md, WEB-QUALITY-AUDIT.md, SECURITY-AUDIT.md §7 remediation log)
+- [ ] **Masih terbuka** (untuk lanjutan): real authN/authZ server-side (verifikasi token vs CRDB users), passkey `credentials.get()`, rewrite copy privasi, `GET /turns` read endpoint, set `ALLOWED_ORIGIN` + rate limit + CSP, route-level code splitting, re-run Lighthouse pada prod build, integrasi WebLLM on-device, wiring `startAudioWorker` (Hold-to-talk)

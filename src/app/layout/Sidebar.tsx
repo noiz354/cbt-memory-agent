@@ -53,7 +53,7 @@ export function Sidebar() {
               {!collapsed && (
                 <span className="min-w-0">
                   <span className="block font-display font-semibold">{item.label}</span>
-                  <span className="block text-[11px] text-white/40">{item.hint}</span>
+                  <span className="block text-[11px] text-white/60">{item.hint}</span>
                 </span>
               )}
             </NavLink>
@@ -65,7 +65,7 @@ export function Sidebar() {
         {!collapsed && profile && (
           <div className="rounded-2xl bg-white/6 px-3 py-2.5">
             <p className="truncate font-display text-sm font-semibold">{profile.displayName}</p>
-            <p className="truncate text-[11px] text-white/40">{profile.email}</p>
+            <p className="truncate text-[11px] text-white/60">{profile.email}</p>
             <p className="mt-1 text-[10px] uppercase tracking-wide text-teal-soft">
               {profile.goals.length} vault goals · {profile.authMethod}
             </p>

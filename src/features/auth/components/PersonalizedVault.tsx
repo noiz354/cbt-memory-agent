@@ -39,7 +39,8 @@ function Zone({
 }
 
 export function PersonalizedVault() {
-  const goals = useAuthStore((s) => s.profile?.goals ?? []);
+  const profileGoals = useAuthStore((s) => s.profile?.goals);
+  const goals = profileGoals ?? [];
   const addGoal = useAuthStore((s) => s.addGoal);
   const removeGoal = useAuthStore((s) => s.removeGoal);
   const toggleGoal = useAuthStore((s) => s.toggleGoal);
@@ -107,7 +108,7 @@ export function PersonalizedVault() {
               <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-white/15 px-4 py-10 text-center">
                 <Sparkles className="size-5 text-teal-soft" />
                 <p className="text-sm font-medium text-white/80">Drop therapy targets here</p>
-                <p className="text-xs text-white/45">At least one goal is required to open the workspace.</p>
+                <p className="text-xs text-white/60">At least one goal is required to open the workspace.</p>
               </div>
             )}
           </div>

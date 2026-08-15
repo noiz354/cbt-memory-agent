@@ -2,6 +2,9 @@ import { useAuthStore } from "@/features/auth/store/authStore";
 import { useChatStore } from "@/features/chat/store/chatStore";
 import { useMemoryStore } from "@/features/memory/store/memoryStore";
 import { useSessionStore } from "@/features/sessions/store/sessionStore";
+import { wipeAllApiKeys } from "@/shared/lib/byokKeyManager";
+import { getAuthHeaders } from "@/shared/lib/authSession";
+import { apiClient } from "@/shared/lib/apiClient";
 import { useAuditStore } from "@/shared/store/auditStore";
 import { useThemeStore } from "@/shared/store/themeStore";
 import { toast } from "@/shared/store/toastStore";
@@ -27,7 +30,7 @@ const CBT_KEYS = [
  * After removal, verifies no `cbt-*` keys remain; if they do, retries once
  * and shows a failure toast.
  */
-export function hardPurgeLocalData() {
+export async function hardPurgeLocalData() {
   useAuditStore.getState().log("HARD_PURGE", "Local vault and account erased");
 
   // Reset in-memory stores first
@@ -35,6 +38,30 @@ export function hardPurgeLocalData() {
   useMemoryStore.getState().wipe();
   useSessionStore.getState().wipe();
   useThemeStore.getState().setMode("light");
+
+  // Wipe BYOK keys in IndexedDB (they are NOT in localStorage's cbt-* keys).
+  // Fail-open: continue even if IndexedDB is unavailable.
+  try {
+    await wipeAllApiKeys();
+  } catch {
+    // IndexedDB unavailable (private mode / blocked) — nothing more we can do
+  }
+
+  // Best-effort server purge: delete all rows keyed to this user in CRDB.
+  // Failure is surfaced via toast, not swallowed silently.
+  const auth = getAuthHeaders();
+  if (auth) {
+    try {
+      await apiClient.purge("hard-purge", auth.token, auth.deviceId);
+    } catch (err) {
+      toast(
+        "Server data not purged",
+        "Cloud rows could not be removed. Re-run purge when online.",
+        "danger",
+      );
+      console.warn("[API] Failed to purge server data:", err);
+    }
+  }
 
   // Remove only allowlisted keys
   for (const key of CBT_KEYS) {

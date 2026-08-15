@@ -1,15 +1,14 @@
 import { MemoryCard } from "./MemoryCard";
 import { useMemoryStore } from "@/features/memory/store/memoryStore";
+import { useMemo } from "react";
 
 export function MemoryRail() {
-  const memories = useMemoryStore((s) =>
-    s.nodes.filter((n) => n.kind === "core" && (n.verified || (n.confidence ?? n.weight) >= 0.6)),
-  );
-  const hidden = useMemoryStore((s) => {
-    const core = s.nodes.filter((n) => n.kind === "core");
+  const nodes = useMemoryStore((s) => s.nodes);
+  const { memories, hidden } = useMemo(() => {
+    const core = nodes.filter((n) => n.kind === "core");
     const shown = core.filter((n) => n.verified || (n.confidence ?? n.weight) >= 0.6);
-    return core.length - shown.length;
-  });
+    return { memories: shown, hidden: core.length - shown.length };
+  }, [nodes]);
 
   return (
     <section className="shrink-0" aria-label="Core memories">

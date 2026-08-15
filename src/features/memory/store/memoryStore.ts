@@ -12,7 +12,11 @@ interface MemoryState {
   edges: GraphEdge[];
   selectedId: string | null;
   burningIds: string[];
+  hydrated: boolean;
+  hydrating: boolean;
+  hydrateError: string | null;
   select: (id: string | null) => void;
+  hydrate: () => Promise<void>;
   moveNode: (id: string, x: number, y: number) => void;
   linkNodes: (source: string, target: string, label?: string) => boolean;
   unlink: (edgeId: string) => void;
@@ -159,7 +163,55 @@ export const useMemoryStore = create<MemoryState>()(
       edges: seedEdges,
       selectedId: null,
       burningIds: [],
+      hydrated: false,
+      hydrating: false,
+      hydrateError: null,
       select: (selectedId) => set({ selectedId }),
+      hydrate: async () => {
+        const auth = getAuthHeaders();
+        if (!auth || get().hydrating) return;
+        set({ hydrating: true, hydrateError: null });
+        try {
+          const data = await apiClient.listMemory(auth.token, auth.deviceId);
+          set({
+            nodes: data.nodes.map((n) => ({
+              id: n.id,
+              kind: n.kind,
+              title: n.title,
+              excerpt: n.excerpt ?? "",
+              tags: n.tags ?? [],
+              weight: n.weight ?? 0.5,
+              confidence: n.confidence,
+              verified: n.verified,
+              references: n.references,
+              lastTouched: n.lastTouched,
+              x: n.x,
+              y: n.y,
+              crisisFlag: n.crisisFlag,
+            })),
+            edges: data.edges.map((e) => ({
+              id: e.id,
+              source: e.source,
+              target: e.target,
+              label: e.label,
+              createdAt: e.createdAt,
+            })),
+            hydrated: true,
+            hydrating: false,
+          });
+        } catch (err) {
+          // FAIL-CLOSED: on hydrate failure, drop the demo seed so fabricated
+          // memories aren't presented as the user's real vault. Empty state is
+          // honest; BackendSyncStatus surfaces the error with a Retry button.
+          set({
+            nodes: [],
+            edges: [],
+            hydrated: true,
+            hydrating: false,
+            hydrateError: err instanceof Error ? err.message : "Failed to load memories",
+          });
+        }
+      },
       moveNode: (id, x, y) =>
         set((s) => ({
           nodes: s.nodes.map((n) => (n.id === id ? { ...n, x, y } : n)),

@@ -40,6 +40,13 @@ export class CrdbClient {
     await pool.query(sql, params);
   }
 
+  /** Execute DML and return the number of affected rows. */
+  async executeCount(sql: string, params: any[] = []): Promise<number> {
+    const pool = this.getPool();
+    const result = await pool.query(sql, params);
+    return result.rowCount ?? 0;
+  }
+
   async healthCheck(): Promise<boolean> {
     try {
       await this.queryOne("SELECT 1 as ok");
