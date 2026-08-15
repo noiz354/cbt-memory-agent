@@ -39,6 +39,13 @@ jobs:
       - name: Build (frontend)
         run: npm run build
 
+      - name: CockroachDB Cloud audit (ccloud CLI health gate)
+        run: |
+          bash scripts/ccloud-audit.sh --quiet
+        env:
+          CRDB_CLUSTER_NAME: ${{ secrets.CRDB_CLUSTER_NAME }}
+          CCLOUD_API_KEY: ${{ secrets.CCLOUD_API_KEY }}
+
       - name: Build Lambda zip
         run: bash scripts/build-lambda.sh
 
