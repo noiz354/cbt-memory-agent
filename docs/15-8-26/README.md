@@ -4,11 +4,16 @@ Audit of **CBT Memory Agent** (`main`, live backend via Vite proxy at `localhost
 CockroachDB cluster `woozy-grivet`, OpenRouter). `typecheck` passes.
 
 | Doc | Content |
-|---|---|
+|---|---|---|
 | [`AUDIT.md`](./AUDIT.md) | Feature-by-feature audit: what is REAL / PARTIAL / STUB / DEAD / BROKEN / FAKE across chat, sessions, memory, auth, crisis, privacy + Lambda stubs. |
 | [`WEB-QUALITY-AUDIT.md`](./WEB-QUALITY-AUDIT.md) | Lighthouse 13.4.1 audit: scores per page, Core Web Vitals, accessibility/SEO details, prioritized fixes. |
 | [`SECURITY-AUDIT.md`](./SECURITY-AUDIT.md) | Security & hardening: authN/authZ (backend accepts any token), persist rehydration bug, privacy-claim mismatch, data-at-rest, remediation. |
 | [`ADDY-OSMANI-SKILLS.md`](./ADDY-OSMANI-SKILLS.md) | Ringkasan 30 skill Addy Osmani (agent-skills + web-quality-skills) yang terinstall di `~/.agents/skills/`. |
+| [`WORK-LIST.md`](./WORK-LIST.md) | Backlog implementasi: on-device (WebLLM/transcription/face/TTS), fitur tanpa UI (semantic search, add-memory, metrics, export, transcript, kanban persist), integrasi backend, hardening. |
+
+> **Status (after `5d3fa6b`):** the top bugs from this audit are already remediated — see the fix-status annotations inline in
+> AUDIT.md (✅ FIXED / 🔶 PARTIAL), SECURITY-AUDIT.md §7 (remediation log), and WEB-QUALITY-AUDIT.md §7 (fix table with status).
+> The headline findings below describe the **pre-fix** state; the `WORK-LIST.md` covers the remaining open work.
 
 ## Headline findings
 
