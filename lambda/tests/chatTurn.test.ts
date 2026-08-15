@@ -17,7 +17,7 @@ function crdbMock(heuristicRows: any[] = [], vectorRows: any[] = []) {
     queries,
     async query(sql: string, params?: unknown[]) {
       queries.push({ sql, params });
-      if (sql.includes("DISTINCT ON (mn.id)")) return vectorRows;
+      if (sql.includes("ORDER BY e.embedding <=> $1::vector")) return vectorRows;
       return heuristicRows;
     },
   };
@@ -63,7 +63,8 @@ describe("getMemoryContext — hybrid retrieval", () => {
     const vectorSql = crdb.queries[1].sql;
     expect(vectorSql).toContain("mn.verified = true");
     expect(vectorSql).toContain("e.user_id = $2::uuid");
-    expect(vectorSql).toContain("DISTINCT ON (mn.id)");
+    expect(vectorSql).toContain("ORDER BY e.embedding <=> $1::vector");
+    expect(vectorSql).not.toContain("IS NOT NULL");
     expect(crdb.queries[1].params?.[0]).toBeTruthy();
     // RRF boost: h1 hadir di kedua list (rank1 heuristik + rank2 vector) → naik
     // di atas h2 (heuristik-only), dan v1 (vector-only) ikut masuk.

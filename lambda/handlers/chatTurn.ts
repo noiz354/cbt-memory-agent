@@ -246,17 +246,18 @@ export async function getMemoryContext(
   const embeddingMs = Date.now() - startedAt;
 
   const vectorRows = await crdb.query<MemoryContext>(
-    `SELECT DISTINCT ON (mn.id) mn.id, mn.title, COALESCE(mn.excerpt, '') AS excerpt,
+    `SELECT mn.id, mn.title, COALESCE(mn.excerpt, '') AS excerpt,
             COALESCE(mn.crisis_flag, false) AS crisisFlag
-     FROM embeddings e
-     JOIN memory_nodes mn ON mn.id = e.node_id
+     FROM memory_nodes mn
+     JOIN (SELECT e.node_id, e.embedding <=> $1::vector AS distance
+           FROM embeddings e
+           WHERE e.user_id = $2::uuid
+           ORDER BY e.embedding <=> $1::vector
+           LIMIT 16) sub ON sub.node_id = mn.id
      WHERE mn.user_id = $2::uuid
-       AND e.user_id = $2::uuid
        AND mn.verified = true
        AND mn.confidence >= 0.6
-       AND e.embedding IS NOT NULL
-     ORDER BY mn.id, e.embedding <=> $1::vector
-     LIMIT 8`,
+     ORDER BY sub.distance`,
     [toVectorLiteral(embedding), userId],
   );
 

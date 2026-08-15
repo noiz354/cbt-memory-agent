@@ -113,14 +113,16 @@ Tabel `embeddings` tetap: `(id, user_id, node_id, embedding vector(1024), text_s
 4. Tanpa daily-cap counter lokal (cap di account OpenRouter); embedding best-effort.
 
 ## 6. Acceptance Criteria
-- [ ] `getMemoryContext` hybrid: hasil relevan semantik lebih tinggi dari heuristik murni.
-- [ ] Fallback mulus: embedding gagal → chat tetap jalan (heuristik), `failed=true`.
-- [ ] Semantic hanya mengembalikan node `verified=true`.
-- [ ] Index live `(user_id, embedding vector_cosine_ops)`; EXPLAIN pada data besar = `vector search`.
-- [ ] Backfill: coverage naik ke 100%, idempotent (run ulang tidak insert duplikat).
-- [ ] Chunking: excerpt 6000 char → ≥3 baris embeddings `chunk-N`.
-- [ ] `cd lambda && npx tsc --noEmit && npm test` hijau (suite + tes baru).
-- [ ] Span attrs mode/embedding_ms/failed muncul.
+- [x] `getMemoryContext` hybrid: hasil relevan semantik lebih tinggi dari heuristik murni.
+- [x] Fallback mulus: embedding gagal → chat tetap jalan (heuristik), `failed=true`.
+- [x] Semantic hanya mengembalikan node `verified=true`.
+- [x] Index live `(user_id, embedding vector_cosine_ops)`; EXPLAIN pada data besar = `vector search`
+  (10k rows; root cause full scan = filter `embedding IS NOT NULL` + bentuk JOIN; fix =
+  derived-table subquery, lihat `FIX-VECTOR-SEARCH-FULL-SCAN.md`).
+- [x] Backfill: coverage naik ke 100%, idempotent (run ulang tidak insert duplikat).
+- [x] Chunking: excerpt 6000 char → ≥3 baris embeddings `chunk-N`.
+- [x] `cd lambda && npx tsc --noEmit && npm test` hijau (suite + tes baru) — 86/86.
+- [x] Span attrs mode/embedding_ms/failed muncul.
 
 ## 7. Boundaries
 - Always: TDD per modul; jalankan seluruh suite sebelum commit.
