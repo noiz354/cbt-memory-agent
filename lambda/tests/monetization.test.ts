@@ -222,4 +222,81 @@ describe("handleTrackEvents", () => {
     );
     expect(res.statusCode).toBe(422);
   });
+
+  it("derives CRISIS_ENGAGED / CRISIS_DISMISSED audit rows from crisis events", async () => {
+    const calls: { sql: string; params: unknown[] }[] = [];
+    const crdb = {
+      async queryOne() {
+        return null;
+      },
+      async execute(sql: string, params: unknown[] = []) {
+        calls.push({ sql, params });
+      },
+    };
+    const res = await handleTrackEvents(
+      makeEvent({
+        events: [
+          { name: "crisis_triggered", properties: { reason: "suicidal ideation" } },
+          { name: "crisis_resolved" },
+          { name: "page_view" },
+        ],
+      }),
+      crdb as any,
+      "token-abcdefgh",
+      "device-1",
+    );
+    expect(res.statusCode).toBe(201);
+
+    const audit = calls.find((c) => c.sql.includes("INSERT INTO audit_events"));
+    expect(audit).toBeDefined();
+    // params: [userId, type1, detail1, type2, detail2]
+    expect(audit!.params[1]).toBe("CRISIS_ENGAGED");
+    const engaged = JSON.parse(audit!.params[2] as string);
+    expect(engaged.event).toBe("crisis_triggered");
+    expect(engaged.reason).toBe("suicidal ideation");
+    expect(audit!.params[3]).toBe("CRISIS_DISMISSED");
+    const dismissed = JSON.parse(audit!.params[4] as string);
+    expect(dismissed.event).toBe("crisis_resolved");
+    expect(audit!.sql).toContain("ON CONFLICT DO NOTHING");
+  });
+
+  it("does not write audit rows when batch has no crisis events", async () => {
+    const calls: { sql: string; params: unknown[] }[] = [];
+    const crdb = {
+      async queryOne() {
+        return null;
+      },
+      async execute(sql: string, params: unknown[] = []) {
+        calls.push({ sql, params });
+      },
+    };
+    const res = await handleTrackEvents(
+      makeEvent({ events: [{ name: "page_view" }] }),
+      crdb as any,
+      "token-abcdefgh",
+      "device-1",
+    );
+    expect(res.statusCode).toBe(201);
+    expect(calls.some((c) => c.sql.includes("INSERT INTO audit_events"))).toBe(false);
+  });
+
+  it("never throws when the crisis audit insert fails", async () => {
+    const calls: { sql: string; params: unknown[] }[] = [];
+    const crdb = {
+      async queryOne() {
+        return null;
+      },
+      async execute(sql: string, params: unknown[] = []) {
+        calls.push({ sql, params });
+        if (sql.includes("INSERT INTO audit_events")) throw new Error("audit boom");
+      },
+    };
+    const res = await handleTrackEvents(
+      makeEvent({ events: [{ name: "crisis_triggered" }] }),
+      crdb as any,
+      "token-abcdefgh",
+      "device-1",
+    );
+    expect(res.statusCode).toBe(201);
+  });
 });

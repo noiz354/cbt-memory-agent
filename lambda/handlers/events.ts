@@ -47,6 +47,61 @@ function parseOccurredAt(raw?: string): string {
   return d.toISOString();
 }
 
+/**
+ * Best-effort mirror of crisis lifecycle events into `audit_events`.
+ *
+ * `/api/v1/metrics` northStar.crisisEvents menghitung row
+ * `audit_events.type IN ('CRISIS_ENGAGED','CRISIS_DISMISSED')` per user
+ * (handlers/health.ts). Frontend sudah mengirim `crisis_triggered` /
+ * `crisis_resolved` ke `/events` (appStore.triggerCrisis/dismissCrisis →
+ * track()), tetapi row audit hanya bisa ditulis server-side. Di sini kita
+ * derive CRISIS_ENGAGED/CRISIS_DISMISSED dari batch events yang valid.
+ *
+ * Dijamin tidak pernah throw / menggagalkan request — kegagalan audit hanya
+ * dicatat di log (pola sama dengan clusterHealth.ts).
+ */
+async function writeCrisisAudit(crdb: CrdbClient, userId: string, events: IncomingEvent[]): Promise<void> {
+  const auditRows: { type: string; detail: string }[] = [];
+  for (const ev of events) {
+    if (ev.name === "crisis_triggered") {
+      auditRows.push({
+        type: "CRISIS_ENGAGED",
+        detail: JSON.stringify({
+          event: ev.name,
+          reason: ev.properties?.reason ?? null,
+          occurredAt: parseOccurredAt(ev.occurredAt),
+        }),
+      });
+    } else if (ev.name === "crisis_resolved") {
+      auditRows.push({
+        type: "CRISIS_DISMISSED",
+        detail: JSON.stringify({
+          event: ev.name,
+          occurredAt: parseOccurredAt(ev.occurredAt),
+        }),
+      });
+    }
+  }
+  if (auditRows.length === 0) return;
+
+  try {
+    const placeholders = auditRows.map((_, i) => `($1::uuid, $${i + 2}, $${i + 3})`).join(",");
+    const params: unknown[] = [userId];
+    for (const row of auditRows) params.push(row.type, row.detail);
+    await crdb.execute(
+      `INSERT INTO audit_events (user_id, type, detail)
+       VALUES ${placeholders}
+       ON CONFLICT DO NOTHING`,
+      params,
+    );
+  } catch (err) {
+    logger.warn("events.crisis_audit_failed", "crisis audit insert failed", {
+      err: err instanceof Error ? err.message : String(err),
+      count: auditRows.length,
+    });
+  }
+}
+
 export async function handleTrackEvents(
   event: APIGatewayProxyEvent,
   crdb: CrdbClient,
@@ -111,6 +166,8 @@ export async function handleTrackEvents(
     });
     return json(500, { error: "Failed to persist events" });
   }
+
+  await writeCrisisAudit(crdb, userId, valid);
 
   logger.info("events.inserted", "events persisted", { inserted: valid.length, rejected: rejected.length });
 
