@@ -11,6 +11,14 @@ import { persist } from "zustand/middleware";
 
 const MAGIC_LINK_TTL_MS = 10 * 60 * 1000;
 
+/** Client-side session TTL. The backend session_token is long-lived, so the
+ *  app enforces its own expiry to re-prompt sign-in after extended inactivity. */
+const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+export function isSessionExpired(sessionExpiresAt: number | null, now: number = Date.now()): boolean {
+  return sessionExpiresAt !== null && now > sessionExpiresAt;
+}
+
 export interface MagicLinkIssueResult {
   ok: boolean;
   sent: boolean;
@@ -31,6 +39,8 @@ interface AuthState {
   pendingEmail: string;
   magicToken: string | null;
   magicTokenExpiresAt: number | null;
+  /** Epoch ms when this session expires; null when signed out. */
+  sessionExpiresAt: number | null;
   setHydrated: (value: boolean) => void;
   setPendingEmail: (email: string) => void;
   issueMagicLink: (email: string, displayName: string) => Promise<MagicLinkIssueResult>;
@@ -80,6 +90,7 @@ export const useAuthStore = create<AuthState>()(
       pendingEmail: "",
       magicToken: null,
       magicTokenExpiresAt: null,
+      sessionExpiresAt: null,
       setHydrated: (hydrated) => set({ hydrated }),
       setPendingEmail: (pendingEmail) => set({ pendingEmail }),
       issueMagicLink: async (email, displayName) => {
@@ -136,6 +147,7 @@ export const useAuthStore = create<AuthState>()(
             status: "authenticated",
             magicToken: null,
             magicTokenExpiresAt: null,
+            sessionExpiresAt: Date.now() + SESSION_TTL_MS,
             step: "disclosure",
             profile: s.profile
               ? {
@@ -169,6 +181,7 @@ export const useAuthStore = create<AuthState>()(
           step: "disclosure",
           magicToken: null,
           magicTokenExpiresAt: null,
+          sessionExpiresAt: Date.now() + SESSION_TTL_MS,
           profile,
         });
         track(TELEMETRY_EVENTS.loginCompleted, { method: input.method });
@@ -183,6 +196,7 @@ export const useAuthStore = create<AuthState>()(
           step: "disclosure",
           magicToken: null,
           magicTokenExpiresAt: null,
+          sessionExpiresAt: Date.now() + SESSION_TTL_MS,
           profile: {
             id: entry.profileId,
             email: entry.email,
@@ -253,22 +267,33 @@ export const useAuthStore = create<AuthState>()(
           pendingEmail: "",
           magicToken: null,
           magicTokenExpiresAt: null,
+          sessionExpiresAt: null,
         }),
     }),
-    createVersionedPersist<AuthState, { status: AuthStatus; profile: SessionProfile | null; step: OnboardingStep }>({
+    createVersionedPersist<
+      AuthState,
+      { status: AuthStatus; profile: SessionProfile | null; step: OnboardingStep; sessionExpiresAt: number | null }
+    >({
       name: "cbt-memory-agent-auth",
       partialize: (state) => ({
         status: state.status,
         profile: state.profile,
         step: state.step,
+        sessionExpiresAt: state.sessionExpiresAt,
       }),
       migrate: (oldData, _fromVersion) => {
         // v0 → v1: add hydrated flag is not in partialize, so just pass through
-        const data = oldData as { status?: AuthStatus; profile?: SessionProfile | null; step?: OnboardingStep };
+        const data = oldData as {
+          status?: AuthStatus;
+          profile?: SessionProfile | null;
+          step?: OnboardingStep;
+          sessionExpiresAt?: number | null;
+        };
         return {
           status: data.status ?? "anonymous",
           profile: data.profile ?? null,
           step: data.step ?? "disclosure",
+          sessionExpiresAt: data.sessionExpiresAt ?? null,
         };
       },
       onRehydrateStorage: (state) => {

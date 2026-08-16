@@ -16,6 +16,30 @@
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "/api/v1";
 
+/**
+ * Global 401 handler (set once at bootstrap). Fired whenever any authenticated
+ * API call returns HTTP 401 — i.e. the session token was revoked/expired and the
+ * user must sign in again. The app wires this to signOut + redirect to /auth.
+ */
+let unauthorizedHandler: (() => void) | null = null;
+
+export function setUnauthorizedHandler(handler: (() => void) | null): void {
+  unauthorizedHandler = handler;
+}
+
+/**
+ * Notify the registered 401 handler. Exported so callers with raw `fetch`
+ * (e.g. the SSE stream path in llmClient) can trigger the same session-expiry
+ * handling as the typed `api()` helper.
+ */
+export function notifyUnauthorized(): void {
+  try {
+    unauthorizedHandler?.();
+  } catch {
+    // Never let the interceptor break the caller's error path.
+  }
+}
+
 interface ApiOptions extends RequestInit {
   token?: string;
   deviceId?: string;
@@ -38,6 +62,7 @@ async function api<T>(path: string, options: ApiOptions = {}): Promise<T> {
   });
 
   if (!res.ok) {
+    if (res.status === 401) notifyUnauthorized();
     const body = await res.text().catch(() => "");
     throw new Error(`API ${res.status}: ${res.statusText} — ${body.slice(0, 200)}`);
   }
@@ -206,7 +231,10 @@ export const apiClient = {
       body: JSON.stringify(body),
     });
 
-    if (!res.ok) throw new Error(`API ${res.status}: ${res.statusText}`);
+    if (!res.ok) {
+      if (res.status === 401) notifyUnauthorized();
+      throw new Error(`API ${res.status}: ${res.statusText}`);
+    }
 
     // Streaming response
     if (onChunk && res.body) {

@@ -14,6 +14,7 @@ import type { LLMProviderId } from "@/shared/lib/llmRegistry";
 import { getProvider, getModel } from "@/shared/lib/llmRegistry";
 import { getApiKey } from "@/shared/lib/byokKeyManager";
 import { getAuthHeaders } from "@/shared/lib/authSession";
+import { notifyUnauthorized } from "@/shared/lib/apiClient";
 import { generateOnDevice } from "@/shared/lib/onDeviceLLM";
 
 // ─────────────────────────────────────────────
@@ -250,6 +251,7 @@ async function callBackendProxy(
   });
 
   if (!response.ok) {
+    if (response.status === 401) notifyUnauthorized();
     throw new Error(`Backend proxy returned ${response.status}: ${response.statusText}`);
   }
 
