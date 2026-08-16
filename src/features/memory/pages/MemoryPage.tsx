@@ -1,7 +1,9 @@
+import { AttachmentGallery } from "@/features/memory/components/AttachmentGallery";
 import { GraphCanvas } from "@/features/memory/components/GraphCanvas";
 import { useMemoryStore } from "@/features/memory/store/memoryStore";
 import { apiClient, type SemanticSearchResult } from "@/shared/lib/apiClient";
 import { getAuthHeaders } from "@/shared/lib/authSession";
+import { cn } from "@/shared/lib/cn";
 import { track, TELEMETRY_EVENTS } from "@/shared/lib/telemetryEvents";
 import { BackendSyncStatus } from "@/shared/ui/BackendSyncStatus";
 import { Search, Sparkles } from "lucide-react";
@@ -21,6 +23,7 @@ export function MemoryPage() {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SemanticSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
+  const [view, setView] = useState<"graph" | "media">("graph");
   const debounce = useRef<number | null>(null);
   const { memoryId } = useParams();
 
@@ -77,6 +80,28 @@ export function MemoryPage() {
           />
         </div>
         <div className="flex items-center gap-3">
+          <div className="inline-flex rounded-full border border-line bg-white p-0.5">
+            <button
+              type="button"
+              onClick={() => setView("graph")}
+              className={cn(
+                "rounded-full px-3 py-1 text-xs font-semibold transition-colors",
+                view === "graph" ? "bg-teal-mist text-teal" : "text-ink-mute hover:text-ink",
+              )}
+            >
+              Graph
+            </button>
+            <button
+              type="button"
+              onClick={() => setView("media")}
+              className={cn(
+                "rounded-full px-3 py-1 text-xs font-semibold transition-colors",
+                view === "media" ? "bg-teal-mist text-teal" : "text-ink-mute hover:text-ink",
+              )}
+            >
+              Media
+            </button>
+          </div>
           <div className="relative">
             <Search className="pointer-events-none absolute left-2.5 top-2.5 size-3.5 text-ink-mute" />
             <input
@@ -119,7 +144,9 @@ export function MemoryPage() {
         </div>
       )}
       <div className="relative min-h-0 flex-1">
-        {hydrated && nodes.length === 0 ? (
+        {view === "media" ? (
+          <AttachmentGallery />
+        ) : hydrated && nodes.length === 0 ? (
           <BackendSyncStatus
             className="absolute inset-0 m-auto h-fit max-w-sm"
             hydrating={false}
