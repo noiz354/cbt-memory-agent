@@ -11,6 +11,8 @@ export function ChatStream() {
   const messages = useChatStore((s) => s.messages);
   const isStreaming = useChatStore((s) => s.isStreaming);
   const activeDropZone = useChatStore((s) => s.activeDropZone);
+  const hydrating = useChatStore((s) => s.hydrating);
+  const hydrateError = useChatStore((s) => s.hydrateError);
   const parentRef = useRef<HTMLDivElement>(null);
   const [stickToBottom, setStickToBottom] = useState(true);
 
@@ -69,6 +71,37 @@ export function ChatStream() {
         onScroll={onScroll}
         className="scrollbar-thin h-full overflow-y-auto px-3 py-2 @md:px-5"
       >
+        {messages.length === 0 && !hydrating && (
+          <div className="flex h-full min-h-40 flex-col items-center justify-center gap-2 px-6 text-center">
+            {hydrateError ? (
+              <>
+                <p className="text-sm font-semibold text-amber-700">
+                  Could not load this conversation
+                </p>
+                <p className="text-xs text-ink-mute">{hydrateError}</p>
+                <p className="text-xs text-ink-mute">
+                  This session lives in your private on-device vault — it stays here unless you
+                  start a new one.
+                </p>
+              </>
+            ) : (
+              <>
+                <Brain className="size-6 text-ink-mute/60" />
+                <p className="text-sm font-semibold text-ink">A fresh, private session</p>
+                <p className="max-w-xs text-xs leading-relaxed text-ink-mute">
+                  Everything you type is analyzed on-device and synced to your vault as a
+                  conversation. Drag a core memory in to ground this turn.
+                </p>
+              </>
+            )}
+          </div>
+        )}
+        {hydrating && (
+          <div className="flex h-full min-h-40 items-center justify-center gap-2 text-xs font-medium uppercase tracking-wider text-ink-mute">
+            <span className="inline-block size-3 animate-spin rounded-full border-2 border-ink/20 border-t-teal" />
+            Restoring conversation…
+          </div>
+        )}
         <div
           style={{ height: virtualizer.getTotalSize(), position: "relative", width: "100%" }}
         >

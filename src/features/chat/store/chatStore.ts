@@ -1,5 +1,6 @@
 import { detectCrisis } from "@/features/crisis/lib/detectCrisis";
 import { useMemoryStore } from "@/features/memory/store/memoryStore";
+import { turnsToMessages } from "@/features/chat/lib/chatTurns";
 import { create } from "zustand";
 import { uid } from "@/shared/lib/format";
 import { useAppStore } from "@/shared/store/appStore";
@@ -26,6 +27,10 @@ interface ChatState {
   isStreaming: boolean;
   activeDropZone: string | null;
   activeSessionId: string;
+  /** Whether the active session's turns have been hydrated from the backend. */
+  hydrated: boolean;
+  hydrating: boolean;
+  hydrateError: string | null;
   face: FaceSignal;
   cameraOpen: boolean;
   recording: boolean;
@@ -40,6 +45,7 @@ interface ChatState {
   injectMemory: (memory: CoreMemory) => void;
   removePendingMemory: (id: string) => void;
   setActiveSession: (sessionId: string | null) => void;
+  hydrate: (sessionId?: string) => Promise<void>;
   sendMessage: (content?: string, audio?: { durationMs: number; peaks: number[]; src: string }) => void;
   appendStreamToken: (token: string) => void;
   finishStream: () => void;
@@ -56,35 +62,23 @@ interface ChatState {
   wipe: () => void;
 }
 
-const seedMessages: ChatMessage[] = [
-  {
-    id: "msg_1",
-    role: "assistant",
-    createdAt: "2026-08-13T08:02:00.000Z",
-    content:
-      "Welcome back. This session stays **on-device** — raw media never leaves the browser; only the clinical summary syncs to your private vault.\n\nWhat would you like to work with today? You can type, hold-to-talk, or drag a **Core Memory** into the stream to inject context.",
-  },
-  {
-    id: "msg_2",
-    role: "user",
-    createdAt: "2026-08-13T08:03:12.000Z",
-    content:
-      "I keep replaying yesterday's slack thread. My chest is tight and I already wrote three drafts I didn't send.",
-  },
-  {
-    id: "msg_3",
-    role: "assistant",
-    createdAt: "2026-08-13T08:03:40.000Z",
-    content:
-      "That sounds like a **threat-scan loop**, not a character flaw.\n\nLet's name the automatic thought first:\n\n> If I send the wrong thing, I'll damage the relationship.\n\nOn a 0–10 scale, how *believable* does that feel in your body right now?\n\nYou can also drag **Sunday kitchen spiral** into this thread if the pattern matches.",
-    audio: {
-      durationMs: 18000,
-      peaks: [0.2, 0.45, 0.7, 0.4, 0.85, 0.3, 0.6, 0.9, 0.35, 0.55, 0.25, 0.7, 0.4],
-      playing: false,
-      progress: 0,
-    },
-  },
-];
+const ACTIVE_SESSION_KEY = "cbt-memory-agent-active-session";
+
+function readStoredSessionId(): string | null {
+  try {
+    return localStorage.getItem(ACTIVE_SESSION_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function persistSessionId(sessionId: string): void {
+  try {
+    localStorage.setItem(ACTIVE_SESSION_KEY, sessionId);
+  } catch {
+    // localStorage unavailable (private mode) — session simply won't restore.
+  }
+}
 
 function toInjected(memory: CoreMemory): InjectedMemory {
   return {
@@ -107,14 +101,17 @@ Respond using CBT techniques: identify the automatic thought, name the cognitive
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
-  messages: seedMessages,
+  messages: [],
   composer: "",
   quote: null,
   pendingAttachments: [],
   pendingMemories: [],
   isStreaming: false,
   activeDropZone: null,
-  activeSessionId: uid("ses"),
+  activeSessionId: readStoredSessionId() ?? uid("ses"),
+  hydrated: false,
+  hydrating: false,
+  hydrateError: null,
   face: { expression: "neutral", confidence: 0.42, updatedAt: Date.now(), model: "fallback" },
   cameraOpen: false,
   recording: false,
@@ -141,10 +138,34 @@ export const useChatStore = create<ChatState>((set, get) => ({
     })),
   setActiveSession: (sessionId) => {
     const created = !sessionId;
+    const next = sessionId ?? uid("ses");
+    persistSessionId(next);
     set({
-      activeSessionId: sessionId ?? uid("ses"),
+      activeSessionId: next,
     });
     if (created) track(TELEMETRY_EVENTS.sessionStarted);
+  },
+  hydrate: async (sessionId) => {
+    const target = sessionId ?? get().activeSessionId;
+    const auth = getAuthHeaders();
+    if (!auth || get().hydrating) return;
+    set({ hydrating: true, hydrateError: null });
+    try {
+      const res = await apiClient.listSessionTurns(target, auth.token, auth.deviceId);
+      set({
+        messages: turnsToMessages(res.turns),
+        hydrated: true,
+        hydrating: false,
+      });
+    } catch (err) {
+      // FAIL-CLOSED: keep the stream empty rather than fabricate a transcript.
+      set({
+        messages: [],
+        hydrated: true,
+        hydrating: false,
+        hydrateError: err instanceof Error ? err.message : "Failed to load conversation",
+      });
+    }
   },
   sendMessage: (content, audio?) => {
     const state = get();
@@ -396,7 +417,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
     })();
   },
-  wipe: () =>
+  wipe: () => {
+    const next = uid("ses");
+    persistSessionId(next);
     set({
       messages: [],
       composer: "",
@@ -404,8 +427,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
       pendingAttachments: [],
       pendingMemories: [],
       isStreaming: false,
+      activeSessionId: next,
+      hydrated: false,
+      hydrating: false,
+      hydrateError: null,
       recording: false,
       cameraOpen: false,
       bargeIn: false,
-    }),
+    });
+  },
 }));

@@ -22,6 +22,7 @@ export function ChatPage() {
   useEffect(() => {
     const sessionId = searchParams.get("session");
     if (sessionId) setActiveSession(sessionId);
+    useChatStore.getState().hydrate(sessionId ?? undefined);
   }, [searchParams, setActiveSession]);
 
   return (
