@@ -1,4 +1,5 @@
 import { CONSENT_VERSION, type AuthMethod, type AuthStatus, type EmergencyContact, type OnboardingStep, type SessionProfile } from "@/features/auth/types";
+import { authenticatePasskey, readPasskeyRegistry, registerPasskey } from "@/features/auth/lib/passkey";
 import { useAuditStore } from "@/shared/store/auditStore";
 import { uid, secureToken } from "@/shared/lib/format";
 import { apiClient } from "@/shared/lib/apiClient";
@@ -15,6 +16,11 @@ export interface MagicLinkIssueResult {
   sent: boolean;
   token: string | null;
   error?: string;
+}
+
+export interface PasskeySignInResult {
+  ok: boolean;
+  reason?: "unsupported" | "empty" | "cancelled" | "failed" | "unregistered";
 }
 
 interface AuthState {
@@ -35,6 +41,8 @@ interface AuthState {
     method: AuthMethod;
     credentialId: string | null;
   }) => void;
+  signInWithPasskey: () => Promise<PasskeySignInResult>;
+  hasRegisteredPasskey: () => boolean;
   setStep: (step: OnboardingStep) => void;
   acceptConsent: () => void;
   toggleGoal: (goal: TherapyGoal) => void;
@@ -145,15 +153,53 @@ export const useAuthStore = create<AuthState>()(
         }
       },
       completeAuth: (input) => {
+        const profile = emptyProfile(input);
+        if (input.method === "passkey" && input.credentialId) {
+          registerPasskey({
+            credentialId: input.credentialId,
+            source: "webauthn",
+            email: profile.email,
+            displayName: profile.displayName,
+            profileId: profile.id,
+            registeredAt: new Date().toISOString(),
+          });
+        }
         set({
           status: "authenticated",
           step: "disclosure",
           magicToken: null,
           magicTokenExpiresAt: null,
-          profile: emptyProfile(input),
+          profile,
         });
         track(TELEMETRY_EVENTS.loginCompleted, { method: input.method });
       },
+      signInWithPasskey: async () => {
+        const result = await authenticatePasskey();
+        if (!result.ok) return { ok: false, reason: result.reason };
+        const entry = readPasskeyRegistry().find((e) => e.credentialId === result.credentialId);
+        if (!entry) return { ok: false, reason: "unregistered" };
+        set({
+          status: "authenticated",
+          step: "disclosure",
+          magicToken: null,
+          magicTokenExpiresAt: null,
+          profile: {
+            id: entry.profileId,
+            email: entry.email,
+            displayName: entry.displayName,
+            authMethod: "passkey",
+            goals: [],
+            consentAcceptedAt: null,
+            consentVersion: CONSENT_VERSION,
+            credentialId: entry.credentialId,
+            emergency: null,
+          },
+        });
+        track(TELEMETRY_EVENTS.loginCompleted, { method: "passkey" });
+        return { ok: true };
+      },
+      hasRegisteredPasskey: () =>
+        readPasskeyRegistry().some((e) => e.source === "webauthn"),
       setStep: (step) => set({ step }),
       acceptConsent: () =>
         set((s) => {

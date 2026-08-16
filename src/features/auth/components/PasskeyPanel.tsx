@@ -3,7 +3,7 @@ import { useAuthStore } from "@/features/auth/store/authStore";
 import { track, TELEMETRY_EVENTS } from "@/shared/lib/telemetryEvents";
 import { Button } from "@/shared/ui/Button";
 import { AnimatePresence, motion } from "framer-motion";
-import { Fingerprint, LoaderCircle, ShieldCheck } from "lucide-react";
+import { Fingerprint, LoaderCircle, LogIn, ShieldCheck } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -16,14 +16,19 @@ type Phase = "idle" | "prompting" | "local" | "done" | "error";
 
 export function PasskeyPanel({ email, displayName }: PasskeyPanelProps) {
   const completeAuth = useAuthStore((s) => s.completeAuth);
+  const signInWithPasskey = useAuthStore((s) => s.signInWithPasskey);
+  const hasRegisteredPasskey = useAuthStore((s) => s.hasRegisteredPasskey);
   const navigate = useNavigate();
   const [supported, setSupported] = useState<boolean | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
   const [note, setNote] = useState<string | null>(null);
+  const [hasPasskey, setHasPasskey] = useState(false);
+  const [signingIn, setSigningIn] = useState(false);
 
   useEffect(() => {
     void platformPasskeyAvailable().then(setSupported);
-  }, []);
+    setHasPasskey(hasRegisteredPasskey());
+  }, [hasRegisteredPasskey]);
 
   const finish = (credentialId: string, methodNote: string) => {
     completeAuth({
@@ -62,6 +67,31 @@ export function PasskeyPanel({ email, displayName }: PasskeyPanelProps) {
     finish(local.credentialId, "Sandbox has no platform authenticator — a local device key was minted instead. Still zero-cloud.");
   };
 
+  const signIn = async () => {
+    setSigningIn(true);
+    setNote(null);
+    const result = await signInWithPasskey();
+    setSigningIn(false);
+    if (result.ok) {
+      setPhase("done");
+      setNote("Passkey verified. Welcome back.");
+      window.setTimeout(() => navigate("/onboarding"), 700);
+      return;
+    }
+    if (result.reason === "cancelled") {
+      setPhase("idle");
+      setNote("Passkey prompt dismissed.");
+      return;
+    }
+    if (result.reason === "unregistered") {
+      setPhase("error");
+      setNote("No registered passkey found for this browser.");
+      return;
+    }
+    setPhase("error");
+    setNote("Could not verify with the platform authenticator.");
+  };
+
   return (
     <div>
       <Button className="w-full" size="lg" onClick={() => void run()} disabled={phase === "prompting" || phase === "local" || phase === "done"}>
@@ -77,6 +107,19 @@ export function PasskeyPanel({ email, displayName }: PasskeyPanelProps) {
           ? "This browser has no platform authenticator. We will mint a local device key."
           : "Uses WebAuthn when the OS offers Face ID, Touch ID, or Windows Hello."}
       </p>
+
+      {hasPasskey && (
+        <Button
+          className="mt-2 w-full"
+          size="lg"
+          variant="ghost"
+          onClick={() => void signIn()}
+          disabled={signingIn || phase === "done"}
+        >
+          {signingIn ? <LoaderCircle className="size-4 animate-spin" /> : <LogIn className="size-4" />}
+          {signingIn ? "Verifying…" : "Sign in with an existing passkey"}
+        </Button>
+      )}
 
       <AnimatePresence>
         {(phase === "prompting" || phase === "local" || phase === "done") && (
