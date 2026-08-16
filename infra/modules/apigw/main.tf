@@ -6,7 +6,7 @@ resource "aws_apigatewayv2_api" "http" {
   description   = "CBT Memory Agent HTTP API — Hackathon 2026"
 
   cors_configuration {
-    allow_origins = ["*"]  # Restrict to frontend domain in production
+    allow_origins = ["*"] # Restrict to frontend domain in production
     allow_methods = ["GET", "POST", "DELETE", "OPTIONS"]
     allow_headers = ["Content-Type", "Authorization", "X-User-Id", "X-Tenant-Id", "Idempotency-Key"]
     max_age       = 600
@@ -50,20 +50,20 @@ resource "aws_apigatewayv2_integration" "lambda" {
   integration_method     = "POST"
   payload_format_version = "2.0"
 
-  timeout_in_milliseconds = 29000  # Must be < Lambda timeout (29s)
+  timeout_in_milliseconds = 29000 # Must be < Lambda timeout (29s)
 }
 
 # Routes
 resource "aws_apigatewayv2_route" "proxy" {
   api_id    = aws_apigatewayv2_api.http.id
-  route_key = "$default"  # Catch-all route
+  route_key = "$default" # Catch-all route
   target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
 }
 
 # CloudWatch Log Group for API Gateway
 resource "aws_cloudwatch_log_group" "api_gateway" {
   name              = "/aws/apigateway/${var.function_name}"
-  retention_in_days = 7  # Hackathon cost optimization
+  retention_in_days = 7 # Hackathon cost optimization
 
   tags = {
     Name = "API Gateway Logs"

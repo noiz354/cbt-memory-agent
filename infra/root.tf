@@ -63,3 +63,27 @@ module "eventbridge" {
 
   depends_on = [module.lambda]
 }
+
+# Frontend — S3 + CloudFront (SPA + proxy /api/v1 → Lambda Function URL)
+module "frontend" {
+  source = "./modules/frontend"
+
+  bucket_name       = var.frontend_bucket
+  api_origin_domain = trim(replace(module.lambda.function_url, "https://", ""), "/")
+
+  depends_on = [module.lambda]
+}
+
+# GitHub OIDC — GitHub Actions deploy tanpa static AWS keys
+module "oidc" {
+  source = "./modules/oidc"
+
+  github_owner    = var.github_owner
+  github_repo     = var.github_repo
+  aws_account_id  = var.aws_account_id
+  aws_region      = var.aws_region
+  environment     = var.environment
+  function_name   = var.function_name
+  s3_bucket       = var.s3_bucket
+  frontend_bucket = var.frontend_bucket
+}

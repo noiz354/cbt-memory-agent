@@ -115,3 +115,27 @@ variable "alert_emails" {
   type        = list(string)
   default     = []
 }
+
+variable "aws_account_id" {
+  description = "AWS account ID (12 digits)"
+  type        = string
+  default     = "926375049642"
+}
+
+variable "frontend_bucket" {
+  description = "S3 bucket for the deployed frontend (S3 + CloudFront)"
+  type        = string
+  default     = "cbt-memory-agent-frontend"
+}
+
+variable "github_owner" {
+  description = "GitHub owner of the repository (OIDC trust)"
+  type        = string
+  default     = "noiz354"
+}
+
+variable "github_repo" {
+  description = "GitHub repository name (OIDC trust)"
+  type        = string
+  default     = "cbt-memory-agent"
+}

@@ -11,10 +11,10 @@ resource "aws_cloudwatch_event_rule" "reflect" {
 }
 
 resource "aws_cloudwatch_event_target" "reflect" {
-  rule  = aws_cloudwatch_event_rule.reflect.name
-  arn   = var.lambda_function_arn
+  rule = aws_cloudwatch_event_rule.reflect.name
+  arn  = var.lambda_function_arn
   input = jsonencode({
-    source      = "agent.memory"
+    source        = "agent.memory"
     "detail-type" = "reflect"
   })
 }

@@ -34,3 +34,18 @@ output "exports_bucket" {
   description = "S3 bucket for export bundles"
   value       = module.lambda.exports_bucket
 }
+
+output "cloudfront_domain" {
+  description = "Frontend CloudFront domain (https://...cloudfront.net)"
+  value       = module.frontend.cloudfront_domain
+}
+
+output "cloudfront_distribution_id" {
+  description = "Frontend CloudFront distribution ID"
+  value       = module.frontend.distribution_id
+}
+
+output "github_actions_role_arn" {
+  description = "OIDC role ARN untuk GitHub Actions deploy"
+  value       = module.oidc.role_arn
+}

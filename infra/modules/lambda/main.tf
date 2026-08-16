@@ -99,7 +99,8 @@ resource "aws_lambda_function_url" "this" {
   authorization_type = "NONE" # Demo only — add auth for production
 
   cors {
-    allow_origins = ["*"]                             # Restrict to frontend domain in production
+    # allow_origins diambil dari var.allowed_origin (dari tfvars: domain CloudFront)
+    allow_origins = [var.allowed_origin]              # Restrict to frontend domain in production
     allow_methods = ["GET", "POST", "DELETE", "HEAD"] # Max 6 chars per method (OPTIONS auto-handled)
     # Lowercase: AWS echoes these back lowercased — matching prevents a perpetual plan diff
     allow_headers = ["authorization", "content-type", "x-device-id", "idempotency-key"]

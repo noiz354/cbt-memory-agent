@@ -1,0 +1,253 @@
+# GitHub OIDC Federation — GitHub Actions tanpa static AWS keys
+#
+# Trust policy dibatasi hanya ke repo `noiz354/cbt-memory-agent` pada ref
+# `refs/heads/main` (StringLike), sehingga role hanya bisa diasumsikan dari
+# workflow repo tersebut, bukan dari repo/ref lain.
+#
+# Catatan: provider OIDC + role dibuat oleh plan ini sendiri. Apply pertama
+# harus dijalankan dengan kredensial lokal (sudah AdministratorAccess);
+# setelah itu CI bisa menjalankan terraform apply dengan role ini.
+
+resource "aws_iam_openid_connect_provider" "github" {
+  url             = "https://token.actions.githubusercontent.com"
+  client_id_list  = ["sts.amazonaws.com"]
+  thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1"]
+}
+
+resource "aws_iam_role" "github_actions" {
+  name = "cbt-github-actions-deploy"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Federated = aws_iam_openid_connect_provider.github.arn
+        }
+        Action = "sts:AssumeRoleWithWebIdentity"
+        Condition = {
+          StringEquals = {
+            "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
+          }
+          StringLike = {
+            "token.actions.githubusercontent.com:sub" = "repo:${var.github_owner}/${var.github_repo}:ref:refs/heads/main"
+          }
+        }
+      }
+    ]
+  })
+
+  tags = {
+    Name = "cbt-github-actions-deploy"
+  }
+}
+
+# Least-privilege: hanya aksi yang dibutuhkan terraform apply + deploy frontend.
+resource "aws_iam_role_policy" "github_actions" {
+  name = "cbt-github-actions-deploy-scoped"
+  role = aws_iam_role.github_actions.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "TerraformStateS3"
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:DeleteObject",
+          "s3:ListBucket",
+          "s3:GetBucketVersioning",
+          "s3:GetBucketLocation"
+        ]
+        Resource = [
+          "arn:aws:s3:::cbt-memory-agent-terraform-state-apse3",
+          "arn:aws:s3:::cbt-memory-agent-terraform-state-apse3/*"
+        ]
+      },
+      {
+        Sid    = "TerraformStateDynamoDB"
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:DeleteItem",
+          "dynamodb:DescribeTable"
+        ]
+        Resource = ["arn:aws:dynamodb:${var.aws_region}:${var.aws_account_id}:table/cbt-memory-agent-terraform-lock-apse3"]
+      },
+      {
+        Sid    = "SSMParameters"
+        Effect = "Allow"
+        Action = [
+          "ssm:PutParameter",
+          "ssm:GetParameter",
+          "ssm:GetParameters",
+          "ssm:DeleteParameter"
+        ]
+        Resource = ["arn:aws:ssm:${var.aws_region}:${var.aws_account_id}:parameter/${var.environment}/*"]
+      },
+      {
+        Sid    = "LambdaFunction"
+        Effect = "Allow"
+        Action = [
+          "lambda:CreateFunction",
+          "lambda:UpdateFunctionCode",
+          "lambda:UpdateFunctionConfiguration",
+          "lambda:GetFunction",
+          "lambda:GetFunctionConfiguration",
+          "lambda:PublishVersion",
+          "lambda:AddPermission",
+          "lambda:RemovePermission",
+          "lambda:DeleteFunction",
+          "lambda:GetFunctionUrlConfig",
+          "lambda:CreateFunctionUrlConfig",
+          "lambda:UpdateFunctionUrlConfig",
+          "lambda:DeleteFunctionUrlConfig",
+          "lambda:TagResource",
+          "lambda:UntagResource"
+        ]
+        Resource = ["arn:aws:lambda:${var.aws_region}:${var.aws_account_id}:function:${var.function_name}"]
+      },
+      {
+        Sid    = "LambdaLogGroup"
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:DescribeLogGroups",
+          "logs:PutRetentionPolicy",
+          "logs:DeleteLogGroup"
+        ]
+        Resource = ["arn:aws:logs:${var.aws_region}:${var.aws_account_id}:log-group:/aws/lambda/${var.function_name}:*"]
+      },
+      {
+        Sid    = "S3Buckets"
+        Effect = "Allow"
+        Action = [
+          "s3:CreateBucket",
+          "s3:DeleteBucket",
+          "s3:PutBucketOwnershipControls",
+          "s3:PutBucketPublicAccessBlock",
+          "s3:GetBucketPolicy",
+          "s3:PutBucketPolicy",
+          "s3:DeleteBucketPolicy",
+          "s3:PutBucketVersioning",
+          "s3:PutBucketEncryption",
+          "s3:GetBucketEncryption",
+          "s3:PutObject",
+          "s3:GetObject",
+          "s3:DeleteObject",
+          "s3:DeleteObjects",
+          "s3:ListBucket"
+        ]
+        Resource = [
+          "arn:aws:s3:::${var.s3_bucket}",
+          "arn:aws:s3:::${var.s3_bucket}/*",
+          "arn:aws:s3:::${var.frontend_bucket}",
+          "arn:aws:s3:::${var.frontend_bucket}/*"
+        ]
+      },
+      {
+        Sid    = "CloudFront"
+        Effect = "Allow"
+        Action = [
+          "cloudfront:CreateDistribution",
+          "cloudfront:UpdateDistribution",
+          "cloudfront:DeleteDistribution",
+          "cloudfront:GetDistribution",
+          "cloudfront:GetDistributionConfig",
+          "cloudfront:ListDistributions",
+          "cloudfront:CreateInvalidation",
+          "cloudfront:GetInvalidation",
+          "cloudfront:CreateOriginAccessControl",
+          "cloudfront:UpdateOriginAccessControl",
+          "cloudfront:DeleteOriginAccessControl",
+          "cloudfront:GetOriginAccessControl",
+          "cloudfront:ListOriginAccessControls",
+          "cloudfront:CreateCachePolicy",
+          "cloudfront:UpdateCachePolicy",
+          "cloudfront:DeleteCachePolicy",
+          "cloudfront:GetCachePolicy",
+          "cloudfront:ListCachePolicies",
+          "cloudfront:CreateResponseHeadersPolicy",
+          "cloudfront:UpdateResponseHeadersPolicy",
+          "cloudfront:DeleteResponseHeadersPolicy",
+          "cloudfront:GetResponseHeadersPolicy",
+          "cloudfront:ListResponseHeadersPolicies",
+          "cloudfront:TagResource",
+          "cloudfront:UntagResource"
+        ]
+        Resource = ["*"] # aksi CloudFront tidak berbasis resource-ARN
+      },
+      {
+        Sid    = "IAMRoleCrd"
+        Effect = "Allow"
+        Action = [
+          "iam:CreateRole",
+          "iam:GetRole",
+          "iam:DeleteRole",
+          "iam:PutRolePolicy",
+          "iam:GetRolePolicy",
+          "iam:DeleteRolePolicy",
+          "iam:ListRolePolicies",
+          "iam:TagRole"
+        ]
+        Resource = [
+          "arn:aws:iam::${var.aws_account_id}:role/${var.function_name}-execution",
+          "arn:aws:iam::${var.aws_account_id}:role/cbt-github-actions-deploy"
+        ]
+      },
+      {
+        Sid      = "IAMPassRole"
+        Effect   = "Allow"
+        Action   = ["iam:PassRole"]
+        Resource = ["arn:aws:iam::${var.aws_account_id}:role/${var.function_name}-execution"]
+      },
+      {
+        Sid    = "IAMOIDCProvider"
+        Effect = "Allow"
+        Action = [
+          "iam:CreateOpenIDConnectProvider",
+          "iam:GetOpenIDConnectProvider",
+          "iam:UpdateOpenIDConnectProviderThumbprint",
+          "iam:DeleteOpenIDConnectProvider",
+          "iam:ListOpenIDConnectProviders",
+          "iam:AddClientIDToOpenIDConnectProvider",
+          "iam:RemoveClientIDFromOpenIDConnectProvider"
+        ]
+        Resource = ["*"] # operasi OIDC provider tidak berbasis resource-ARN
+      },
+      {
+        Sid    = "EventBridge"
+        Effect = "Allow"
+        Action = [
+          "events:PutRule",
+          "events:DescribeRule",
+          "events:DeleteRule",
+          "events:PutTargets",
+          "events:RemoveTargets",
+          "events:ListTargetsByRule",
+          "events:TagResource",
+          "events:UntagResource"
+        ]
+        Resource = ["arn:aws:events:${var.aws_region}:${var.aws_account_id}:rule/${var.function_name}-reflect"]
+      },
+      {
+        Sid    = "BudgetAndCloudWatch"
+        Effect = "Allow"
+        Action = [
+          "budgets:CreateBudget",
+          "budgets:DescribeBudget",
+          "budgets:DescribeBudgets",
+          "budgets:UpdateBudget",
+          "budgets:DeleteBudget",
+          "cloudwatch:PutMetricData",
+          "cloudwatch:GetMetricData"
+        ]
+        Resource = ["*"]
+      }
+    ]
+  })
+}

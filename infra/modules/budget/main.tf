@@ -3,7 +3,7 @@
 resource "aws_budgets_budget" "hackathon" {
   name              = "cbt-memory-agent-hackathon-budget"
   budget_type       = "COST"
-  limit_amount      = "1.00"  # $1 max budget
+  limit_amount      = "1.00" # $1 max budget
   limit_unit        = "USD"
   time_unit         = "MONTHLY"
   time_period_start = "2026-08-13_00:00"
