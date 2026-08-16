@@ -2,6 +2,7 @@ import { apiClient } from "@/shared/lib/apiClient";
 import { getAuthHeaders } from "@/shared/lib/authSession";
 import { Badge } from "@/shared/ui/Badge";
 import { useEffect, useState } from "react";
+import { AnalyticsSection } from "../components/AnalyticsSection";
 
 interface MetricsPayload {
   v?: number;
@@ -39,16 +40,21 @@ export function MetricsPage() {
   const [data, setData] = useState<MetricsPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [headers, setHeaders] = useState<{ token: string; deviceId: string } | null>(null);
+  const [refreshTick, setRefreshTick] = useState(0);
 
   const load = () => {
     const auth = getAuthHeaders();
     if (!auth) {
       setError("No active session — metrics require an authenticated profile.");
       setLoading(false);
+      setHeaders(null);
       return;
     }
+    setHeaders({ token: auth.token, deviceId: auth.deviceId });
     setLoading(true);
     setError(null);
+    setRefreshTick((t) => t + 1);
     apiClient
       .metrics(auth.token, auth.deviceId)
       .then((res) => {
@@ -163,6 +169,8 @@ export function MetricsPage() {
               </p>
             )}
           </section>
+
+          {headers && <AnalyticsSection token={headers.token} deviceId={headers.deviceId} refreshTick={refreshTick} />}
         </div>
       )}
 

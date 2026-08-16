@@ -399,6 +399,30 @@ export const apiClient = {
   metrics: (token: string, deviceId: string) =>
     api<Record<string, unknown>>("/metrics", { token, deviceId }),
 
+  /** GET /analytics/funnel — Distinct users per activation step + step conversion. */
+  analyticsFunnel: (token: string, deviceId: string, period?: string) =>
+    api<{
+      v: 1;
+      period: string;
+      steps: { name: string; users: number }[];
+      conversion: { from: string; to: string; rate: number | null }[];
+    }>(`/analytics/funnel${period ? `?period=${encodeURIComponent(period)}` : ""}`, { token, deviceId }),
+
+  /** GET /analytics/activity — DAU/WAU/MAU + sticky factor for the period. */
+  analyticsActivity: (token: string, deviceId: string, period?: string) =>
+    api<{ v: 1; period: string; dau: number; wau: number; mau: number; stickyFactor: number | null }>(
+      `/analytics/activity${period ? `?period=${encodeURIComponent(period)}` : ""}`,
+      { token, deviceId },
+    ),
+
+  /** GET /analytics/retention — Cohort retention (6-month window ending at period). */
+  analyticsRetention: (token: string, deviceId: string, period?: string) =>
+    api<{
+      v: 1;
+      period: string;
+      cohorts: { cohort: string; age: number; size: number; active: number; retentionPct: number | null }[];
+    }>(`/analytics/retention${period ? `?period=${encodeURIComponent(period)}` : ""}`, { token, deviceId }),
+
   /** POST /events — Track product/monetization events (FASE 4). */
   trackEvent: (
     events: { name: string; properties?: Record<string, unknown> | null; sessionId?: string; occurredAt?: string }[],
