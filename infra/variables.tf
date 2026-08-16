@@ -110,12 +110,6 @@ variable "allowed_origin" {
   default     = "*"
 }
 
-variable "alert_emails" {
-  description = "Email addresses for budget/cloudwatch alerts"
-  type        = list(string)
-  default     = []
-}
-
 variable "aws_account_id" {
   description = "AWS account ID (12 digits)"
   type        = string

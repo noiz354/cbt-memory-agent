@@ -44,15 +44,6 @@ module "lambda" {
   depends_on = [module.iam, module.ssm]
 }
 
-# Budget & Cost Monitoring
-module "budget" {
-  source = "./modules/budget"
-
-  alert_emails = var.alert_emails
-
-  depends_on = [module.lambda]
-}
-
 # EventBridge — agentic memory reflection cron (tiap 6 jam)
 module "eventbridge" {
   source = "./modules/eventbridge"

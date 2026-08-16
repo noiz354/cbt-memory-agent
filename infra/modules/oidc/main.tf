@@ -322,16 +322,9 @@ resource "aws_iam_role_policy" "github_actions" {
         Resource = ["arn:aws:events:${var.aws_region}:${var.aws_account_id}:rule/${var.function_name}-reflect"]
       },
       {
-        Sid    = "BudgetAndCloudWatch"
+        Sid    = "CloudWatch"
         Effect = "Allow"
         Action = [
-          "budgets:CreateBudget",
-          "budgets:DescribeBudget",
-          "budgets:DescribeBudgets",
-          "budgets:ViewBudget",
-          "budgets:ViewBudgets",
-          "budgets:UpdateBudget",
-          "budgets:DeleteBudget",
           "cloudwatch:PutMetricData",
           "cloudwatch:GetMetricData",
           "cloudwatch:DescribeAlarms",
