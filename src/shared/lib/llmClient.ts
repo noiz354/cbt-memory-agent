@@ -53,6 +53,15 @@ export interface LLMStreamChunk {
 
 export type LLMStreamCallback = (chunk: LLMStreamChunk) => void;
 
+/** True when a fetch/stream was cancelled via AbortSignal (not a real failure). */
+export function isAbortError(err: unknown): boolean {
+  return (
+    err instanceof DOMException
+      ? err.name === "AbortError"
+      : (err as { name?: string } | null)?.name === "AbortError"
+  );
+}
+
 // ─────────────────────────────────────────────
 // CBT System Prompt
 // ─────────────────────────────────────────────
@@ -79,11 +88,13 @@ Guidelines:
  *
  * @param request LLM request (providerId/modelId optional — akan diisi default)
  * @param onStream Optional streaming callback
+ * @param signal Optional AbortSignal — membatalkan request/stream yang sedang berjalan
  * @returns LLMResponse
  */
 export async function callLLM(
   request: Partial<LLMRequest> & { messages: LLMMessage[] },
   onStream?: LLMStreamCallback,
+  signal?: AbortSignal,
 ): Promise<LLMResponse> {
   const started = Date.now();
 
@@ -109,43 +120,50 @@ export async function callLLM(
 
   // Route by provider type
   if (providerId === "local-webllm") {
-    return callOnDeviceLLM(fullRequest, onStream, started);
+    return callOnDeviceLLM(fullRequest, onStream, started, signal);
   }
 
   if (providerId === "backend-proxy") {
-    return callBackendProxy(fullRequest, onStream, started);
+    return callBackendProxy(fullRequest, onStream, started, signal);
   }
 
   // BYOK: ambil key dari IndexedDB → call provider API
-  return callBYOK(fullRequest, onStream, started);
+  return callBYOK(fullRequest, onStream, started, signal);
 }
 
 /**
  * Call dengan fallback chain otomatis.
  * Coba on-device dulu, kalau gagal → backend, kalau gagal → BYOK.
+ *
+ * Abort (signal) di-prop secara eksplisit: pembatalan pengguna TIDAK memicu
+ * fallback ke provider berikutnya — request yang di-cancel berhenti di situ.
  */
 export async function callLLMWithFallback(
   messages: LLMMessage[],
   onStream?: LLMStreamCallback,
+  signal?: AbortSignal,
 ): Promise<LLMResponse> {
   // 1. Coba on-device (WebLLM)
   try {
-    return await callLLM({ providerId: "local-webllm", messages }, onStream);
+    return await callLLM({ providerId: "local-webllm", messages }, onStream, signal);
   } catch (err) {
+    if (isAbortError(err)) throw err;
     console.warn("[LLM] On-device failed, trying backend:", err);
   }
 
   // 2. Coba backend proxy
   try {
-    return await callLLM({ providerId: "backend-proxy", messages }, onStream);
+    return await callLLM({ providerId: "backend-proxy", messages }, onStream, signal);
   } catch (err) {
+    if (isAbortError(err)) throw err;
     console.warn("[LLM] Backend failed, trying BYOK:", err);
   }
 
   // 3. Coba BYOK (default model dari OpenRouter)
   try {
-    return await callLLM({ providerId: "openrouter", messages }, onStream);
+    return await callLLM({ providerId: "openrouter", messages }, onStream, signal);
   } catch (err) {
+    if (isAbortError(err)) throw err;
     throw new Error(`All LLM fallbacks failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
@@ -158,11 +176,17 @@ async function callOnDeviceLLM(
   request: LLMRequest,
   onStream: LLMStreamCallback | undefined,
   started: number,
+  signal?: AbortSignal,
 ): Promise<LLMResponse> {
   try {
     const result = await generateOnDevice(request.messages, (delta) => {
+      // WebLLM tidak punya API cancel langsung — periksa signal tiap delta.
+      if (signal?.aborted) return;
       onStream?.({ delta, done: false });
     });
+    if (signal?.aborted) {
+      throw new DOMException("The operation was aborted.", "AbortError");
+    }
     onStream?.({ delta: "", done: true });
     return {
       content: result.content,
@@ -175,6 +199,7 @@ async function callOnDeviceLLM(
     // Fail-closed: any on-device failure (unsupported browser, missing WebGPU,
     // model load error) throws so the fallback chain (backend-proxy → BYOK)
     // actually runs. Never return a placeholder.
+    if (isAbortError(err)) throw err;
     throw new Error(
       `On-device LLM unavailable: ${err instanceof Error ? err.message : String(err)}`,
     );
@@ -189,6 +214,7 @@ async function callBackendProxy(
   request: LLMRequest,
   onStream: LLMStreamCallback | undefined,
   started: number,
+  signal?: AbortSignal,
 ): Promise<LLMResponse> {
   const provider = getProvider("backend-proxy");
   const url = `${provider.baseUrl}${provider.apiPath}`;
@@ -220,19 +246,21 @@ async function callBackendProxy(
       "X-Device-Id": auth.deviceId,
     },
     body: JSON.stringify(body),
+    signal,
   });
 
   if (!response.ok) {
     throw new Error(`Backend proxy returned ${response.status}: ${response.statusText}`);
   }
 
-  return parseBackendProxySSE(response, onStream, started);
+  return parseBackendProxySSE(response, onStream, started, signal);
 }
 
 async function parseBackendProxySSE(
   response: Response,
   onStream: LLMStreamCallback | undefined,
   started: number,
+  signal?: AbortSignal,
 ): Promise<LLMResponse> {
   if (onStream && response.body) {
     const reader = response.body.getReader();
@@ -241,6 +269,9 @@ async function parseBackendProxySSE(
 
     try {
       while (true) {
+        if (signal?.aborted) {
+          throw new DOMException("The operation was aborted.", "AbortError");
+        }
         const { done, value } = await reader.read();
         if (done) break;
         const chunk = decoder.decode(value, { stream: true });
@@ -311,6 +342,7 @@ async function callBYOK(
   request: LLMRequest,
   onStream: LLMStreamCallback | undefined,
   started: number,
+  signal?: AbortSignal,
 ): Promise<LLMResponse> {
   const apiKey = await getApiKey(request.providerId, request.modelId);
   if (!apiKey) {
@@ -355,6 +387,7 @@ async function callBYOK(
     method: "POST",
     headers,
     body: JSON.stringify(body),
+    signal,
   });
 
   if (!response.ok) {
@@ -362,7 +395,7 @@ async function callBYOK(
     throw new Error(`${provider.name} API returned ${response.status}: ${errorText.slice(0, 200)}`);
   }
 
-  return parseChatResponse(response, request.providerId, request.modelId, onStream, started);
+  return parseChatResponse(response, request.providerId, request.modelId, onStream, started, signal);
 }
 
 // ─────────────────────────────────────────────
@@ -375,6 +408,7 @@ async function parseChatResponse(
   modelId: string,
   onStream: LLMStreamCallback | undefined,
   started: number,
+  signal?: AbortSignal,
 ): Promise<LLMResponse> {
   // Anthropic response format berbeda
   if (providerId === "anthropic") {
@@ -403,7 +437,7 @@ async function parseChatResponse(
   // OpenAI-compatible format (sebagian besar provider)
   if (onStream && response.body) {
     // Streaming response
-    return parseStreamingResponse(response, providerId, modelId, onStream, started);
+    return parseStreamingResponse(response, providerId, modelId, onStream, started, signal);
   }
 
   // Non-streaming response
@@ -423,6 +457,7 @@ async function parseStreamingResponse(
   modelId: string,
   onStream: LLMStreamCallback,
   started: number,
+  signal?: AbortSignal,
 ): Promise<LLMResponse> {
   const reader = response.body?.getReader();
   if (!reader) {
@@ -434,6 +469,9 @@ async function parseStreamingResponse(
 
   try {
     while (true) {
+      if (signal?.aborted) {
+        throw new DOMException("The operation was aborted.", "AbortError");
+      }
       const { done, value } = await reader.read();
       if (done) break;
 

@@ -4,7 +4,7 @@ const auth = vi.hoisted(() => ({ getAuthHeaders: vi.fn() }));
 
 vi.mock("@/shared/lib/authSession", () => ({ getAuthHeaders: auth.getAuthHeaders }));
 
-import { callLLM, type LLMStreamChunk } from "@/shared/lib/llmClient";
+import { callLLM, isAbortError, type LLMStreamChunk } from "@/shared/lib/llmClient";
 
 function sseResponse(body: string, status = 200): Response {
   const stream = new ReadableStream<Uint8Array>({
@@ -15,6 +15,25 @@ function sseResponse(body: string, status = 200): Response {
   });
   return new Response(stream, {
     status,
+    headers: { "Content-Type": "text/event-stream; charset=utf-8" },
+  });
+}
+
+/** SSE response whose chunks arrive over time, so a mid-stream abort can fire. */
+function sseResponseChunked(chunks: string[], chunkDelayMs: number): Response {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      chunks.forEach((chunk, i) => {
+        setTimeout(() => {
+          controller.enqueue(encoder.encode(chunk));
+          if (i === chunks.length - 1) controller.close();
+        }, chunkDelayMs * (i + 1));
+      });
+    },
+  });
+  return new Response(stream, {
+    status: 200,
     headers: { "Content-Type": "text/event-stream; charset=utf-8" },
   });
 }
@@ -90,5 +109,54 @@ describe("callLLM backend-proxy SSE", () => {
     await expect(
       callLLM({ providerId: "backend-proxy", messages: [{ role: "user", content: "hi" }] }),
     ).rejects.toThrow(/502/);
+  });
+
+  it("aborts cleanly when the signal is aborted before the stream resolves", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(sseResponse("data: [DONE]\n\n")));
+
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      callLLM(
+        { providerId: "backend-proxy", messages: [{ role: "user", content: "hi" }] },
+        () => {},
+        controller.signal,
+      ),
+    ).rejects.toThrow(/aborted/i);
+  });
+
+  it("aborts during SSE parsing once the signal fires mid-stream", async () => {
+    const chunks = ['data: {"t":"Hello"}\n\n', 'data: {"t":" there"}\n\n', "data: [DONE]\n\n"];
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(sseResponseChunked(chunks, 20)));
+
+    const controller = new AbortController();
+    // Abort shortly after the call begins (mid-read loop, before the final chunk).
+    const timer = setTimeout(() => controller.abort(), 5);
+
+    await expect(
+      callLLM(
+        { providerId: "backend-proxy", messages: [{ role: "user", content: "hi" }] },
+        () => {},
+        controller.signal,
+      ),
+    ).rejects.toThrow(/aborted/i);
+    clearTimeout(timer);
+  });
+});
+
+describe("isAbortError", () => {
+  it("recognizes DOMException AbortError", () => {
+    expect(isAbortError(new DOMException("The operation was aborted.", "AbortError"))).toBe(true);
+  });
+
+  it("recognizes a plain error object with name AbortError", () => {
+    expect(isAbortError({ name: "AbortError" })).toBe(true);
+  });
+
+  it("returns false for ordinary errors", () => {
+    expect(isAbortError(new Error("boom"))).toBe(false);
+    expect(isAbortError(null)).toBe(false);
+    expect(isAbortError("nope")).toBe(false);
   });
 });

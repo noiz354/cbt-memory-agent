@@ -5,7 +5,7 @@ import { create } from "zustand";
 import { uid } from "@/shared/lib/format";
 import { useAppStore } from "@/shared/store/appStore";
 import { getAuthHeaders } from "@/shared/lib/authSession";
-import { callLLMWithFallback, type LLMMessage } from "@/shared/lib/llmClient";
+import { callLLMWithFallback, isAbortError, type LLMMessage } from "@/shared/lib/llmClient";
 import { apiClient } from "@/shared/lib/apiClient";
 import { metric } from "@/shared/lib/metrics";
 import { track, TELEMETRY_EVENTS } from "@/shared/lib/telemetryEvents";
@@ -60,6 +60,13 @@ interface ChatState {
   resumeStream: () => void;
   setProsody: (rms: number) => void;
   wipe: () => void;
+}
+
+/** Active stream's AbortController — lets barge-in/hard-halt actually cancel the fetch. */
+let activeAbort: AbortController | null = null;
+
+function abortActiveStream(): void {
+  activeAbort?.abort();
 }
 
 const ACTIVE_SESSION_KEY = "cbt-memory-agent-active-session";
@@ -235,6 +242,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     // Call LLM with fallback chain (on-device → backend → BYOK)
     void (async () => {
+      const controller = new AbortController();
+      activeAbort = controller;
       try {
         const messages: LLMMessage[] = [{ role: "user", content: reply }];
         let fullResponse = "";
@@ -254,7 +263,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             metric.streamDone();
             track(TELEMETRY_EVENTS.streamDone);
           }
-        });
+        }, controller.signal);
 
         // Sync to backend (CockroachDB) — fire and forget
         const auth = getAuthHeaders();
@@ -277,6 +286,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }
         }
       } catch (err) {
+        // User-initiated cancel (barge-in / hard-halt) — bubbles already closed.
+        if (isAbortError(err)) return;
         // All LLM fallbacks failed — show error message
         set((s) => ({
           isStreaming: false,
@@ -290,6 +301,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
               : m,
           ),
         }));
+      } finally {
+        if (activeAbort === controller) activeAbort = null;
       }
     })();
   },
@@ -332,6 +345,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   triggerBargeIn: () => {
     const { isStreaming } = get();
     if (!isStreaming) return;
+    abortActiveStream();
     set((s) => ({
       bargeIn: true,
       isStreaming: false,
@@ -363,6 +377,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       ],
     })),
   hardHalt: () => {
+    abortActiveStream();
     set((s) => ({
       isStreaming: false,
       recording: false,
@@ -393,6 +408,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     // Resume via LLM fallback chain
     void (async () => {
+      const controller = new AbortController();
+      activeAbort = controller;
       try {
         const messages: LLMMessage[] = [{ role: "user", content: "Continue your previous response from where it was truncated." }];
         await callLLMWithFallback(messages, (chunk) => {
@@ -404,8 +421,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
             metric.streamDone();
             track(TELEMETRY_EVENTS.streamDone);
           }
-        });
-      } catch {
+        }, controller.signal);
+      } catch (err) {
+        if (isAbortError(err)) return;
         set((s) => ({
           isStreaming: false,
           messages: s.messages.map((m, i) =>
@@ -414,6 +432,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
               : m,
           ),
         }));
+      } finally {
+        if (activeAbort === controller) activeAbort = null;
       }
     })();
   },
