@@ -328,6 +328,8 @@ resource "aws_iam_role_policy" "github_actions" {
           "budgets:CreateBudget",
           "budgets:DescribeBudget",
           "budgets:DescribeBudgets",
+          "budgets:ViewBudget",
+          "budgets:ViewBudgets",
           "budgets:UpdateBudget",
           "budgets:DeleteBudget",
           "cloudwatch:PutMetricData",
