@@ -87,35 +87,26 @@ lalu menyisipkan blok `CockroachDB Agent Skills Context` ke user prompt sebelum 
   (boolean).
 - Referensi: `docs/15-8-26/PLAN-CLUSTER-HEALTH-SKILLS.md` · test `lambda/tests/agentSkills.test.ts`.
 
----
+### 5. Emotional media attachments (kind='attachment' + S3 raw media) ✅
 
-## 📋 AUTH MANAGED MCP (AKTIF)
+**Status:** ✅ **Dibuat 2026-08-16** — Media emosional (gambar/video/audio) di-analysis **on-device**
+(MediaPipe face, prosody DSP, Whisper transcript) lalu di-index sebagai memory node
+`kind='attachment'` (verified=true) + **raw media di S3**. Recall otomatis via hybrid RRF
+`getMemoryContext` (3 leg retrieval tidak memfilter `kind`).
 
-- **Endpoint:** `https://cockroachlabs.cloud/mcp`
-- **Header wajib:**
-  - `mcp-cluster-id: 87275047-fbf8-4f18-8b8d-a5ff97a335e3`
-  - `Authorization: Bearer $CCLOUD_MCP_API_KEY` (service account, read-only)
-- **Config file:** `mcp/mcp-config.json` (JSON-RPC HTTP) + `.mcp.json` (Claude Code / editor)
-
-## 📊 MCP TOOLS — BUKTI LIVE (2026-08-16)
-
-Semua tool read-only berhasil dipanggil via JSON-RPC POST ke managed endpoint
-(autentikasi service-account API key). Bukti tersimpan di `docs/15-8-26/mcp-proof/`:
-
-| Tool | Hasil live | File bukti |
-|---|---|---|
-| `tools/list` | 9 tool tersedia (read + write opt-in) | `tools-list.txt` |
-| `list_databases` | `defaultdb` (owner root) | `list-databases.txt` |
-| `list_tables` | 12 tabel; `memory_nodes` 10.003 rows, `embeddings` 10.003 | `list-tables.txt` |
-| `get_table_schema` | `embeddings` + `VECTOR INDEX embeddings_vector_idx (user_id, embedding vector_cosine_ops)` | `get-table-schema-embeddings.txt` |
-| `explain_query` (keyword) | Plan memakai `memory_nodes_search_idx` (inverted index), 1 span | `explain-keyword-query.txt` |
-| `explain_query` (vector) | Error `different vector dimensions 4 and 1024` — **guardrail nyata** (literal vector salah dimensi ditolak tanpa eksekusi) | `explain-vector-query.txt` |
-| `select_query` | `SELECT COUNT(*) FROM memory_nodes` → `10003` | `select-query-count.txt` |
-| `get_cluster` | `woozy-grivet`, v26.2.5, AWS, BASIC, ap-southeast-3 | `get-cluster.txt` |
-
-> **Catatan:** `explain_query` tidak mendukung `EXPLAIN ANALYZE` (batch menolak).
-> Tool write (`create_database`, `create_table`, `insert_rows`) tersedia di `tools/list`
-> tapi TIDAK dicoba — konsisten dengan keputusan read-only.
+- **API:** `POST /api/v1/attachments/presign` (presigned PUT, key `media/{userId}/{uuid}.{ext}`,
+  ext divalidasi) → `POST /api/v1/attachments` (INSERT node + `attachments` row + `writeNodeEmbedding`
+  dari narrative) → `GET /api/v1/attachments` → `DELETE /api/v1/attachments/:id` (match
+  `memory_node_id`, delete S3 + node cascade). Handler: `lambda/handlers/attachments.ts`.
+- **Schema:** migration `schema/migration-2026-08-16-attachments.sql` (kind CHECK + tabel `attachments`
+  FK `memory_node_id → memory_nodes(id) ON DELETE CASCADE` — pola embeddings, purge otomatis).
+- **S3:** `lambda/lib/s3.ts` + `presignMediaUpload`/`deleteMediaObject`/`deleteMediaPrefix`; IAM
+  `s3:DeleteObject/DeleteObjects`.
+- **Frontend pipeline:** `attachmentAnalysis.ts` (narrative template deterministik), `prosody.ts` +
+  `prosody.worker.ts` (pitch autocorrelation, pause, wpm), `faceClient.analyzeFrame()` one-shot,
+  `attachmentIndex.ts` orchestration; UI di CameraPip/VideoRecorderPip/HoldToTalkOrb/Composer.
+- **Privacy:** raw media stays in-browser; hanya clinical summary + upload eksplisit yang sinkron.
+- Referensi: `docs/15-8-26/PLAN-EMOTIONAL-ATTACHMENTS.md` · `ADR-007` · test `lambda/tests/attachments.test.ts`.
 
 ---
 
