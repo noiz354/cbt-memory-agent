@@ -2,8 +2,10 @@
 
 > Runbook pengetesan **manusia** terhadap fitur yang sudah **live** di produksi:
 > Emotional Media Attachments, Reflection Loop (MCP + cluster health gate + skills),
-> dan recall hybrid RRF. Update: 2026-08-16. Backend: Lambda Function URL
-> (`CBT Memory Agent`), DB: CockroachDB Cloud `woozy-grivet` (v26.2.5).
+> recall hybrid RRF, dan **11 perbaikan gap audit integrasi frontend-backend**
+> (commits `158cc2a`..`76328ed`, `docs/FRONTEND-INTEGRATION-AUDIT.md`).
+> Update: 2026-08-16. Backend: Lambda Function URL (`CBT Memory Agent`),
+> DB: CockroachDB Cloud `woozy-grivet` (v26.2.5).
 
 ## 1. Lingkungan uji
 
@@ -131,9 +133,13 @@ curl -N -s "$BASE/api/v1/chat/turn" "${AUTH[@]}" "${JSON[@]}" -d '{
   "deviceOnly": true
 }'; echo
 ```
-Harapan: respons SSE `data: {"t":"..."}` diakhiri `data: [DONE]`. Di log Lambda, span
-`agent.memory.retrieve` berisi `memory.recalled_titles` yang memuat judul attachment.
-> Verifikasi LLM mention-nya opsional — bukti kuat = retrieved titles di log (lihat §6).
+Harapan: respons SSE `data: {"t":"..."}` diakhiri `data: [DONE]`. Event terakhir sebelum
+`[DONE]` kini membawa metadata recall: `data: {"t":"","injectedMemoryIds":[...],"recalledTitles":[...]}`
+(commit `96e8cee` — backend meng-echo judul recall yang sebelumnya hanya ada di span
+`agent.memory.retrieve`). Di log Lambda, span `agent.memory.retrieve` berisi
+`memory.recalled_titles` yang memuat judul attachment.
+> Verifikasi LLM mention-nya opsional — bukti kuat = retrieved titles di log (lihat §6)
+> atau chip "Recalled N memories" + judul di UI (lihat §7 U1–U2).
 
 ---
 
@@ -190,7 +196,34 @@ cockroach sql --url "$CRDB_URL" --execute "
 
 ---
 
-## 7. Checklist hasil
+## 7. UI Frontend — Verifikasi Manual (fitur pasca-audit)
+
+> Perbaikan 11 gap audit integrasi (`docs/FRONTEND-INTEGRATION-AUDIT.md`) sudah **live** dan
+> butuh verifikasi **manusia di browser**. Jalankan frontend: `npm run dev` di root →
+> buka `http://localhost:5173` (Vite proxy `/api/v1` → Function URL live). Login dengan
+> magic-link (token bebas ≥8 karakter; dev-mode menampilkan preview link).
+
+| # | Fitur | Langkah uji | Harapan |
+|---|---|---|---|
+| U1 | Chip "Recalled N memories" | Kirim pesan yang memicu retrieval (setelah ada memory `verified=true`) | Balasan asisten menampilkan chip `Recalled N memories` (dari event SSE `injectedMemoryIds`) |
+| U2 | Chip judul recall | Lihat balasan yang memicu recall pada U1 | Chip judul memory (teal) muncul di balasan; klik → pindah ke `/memory` |
+| U3 | Chat hydrate dari backend | Kirim beberapa pesan → reload halaman → buka sesi aktif | Percakapan lama termuat dari `chat_turns`, **tanpa pesan seed demo** |
+| U4 | Galeri attachment | Buka `/memory` → toggle **Graph/Media** | Daftar attachment tampil; tombol hapus → node + S3 terhapus |
+| U5 | Analytics di `/metrics` | Buka `/metrics` → section **Analytics** | Kartu funnel / activity (DAU/WAU/MAU) / retention dari API nyata |
+| U6 | Passkey sign-in | Setelah pernah passkey sign-in, logout → "Sign in with existing passkey" | Kembali ke profil yang sama (tanpa profil baru) |
+| U7 | Session expiry → redirect | (Opsional) set `sessionExpiresAt` ke masa lalu di localStorage → reload | Redirect ke `/auth` + sign-out bersih |
+| U8 | AbortController (Stop) | Mulai stream jawaban panjang → klik **Stop** | Stream benar-benar berhenti; tidak ada ghost token |
+| U9 | Rate-limit 429 | Burst beberapa chat turn cepat | Pesan rate-limit ramah dengan hint `Retry-After`, bukan error generik |
+| U10 | Crisis → audit server | Picu overlay crisis (atau kirim `crisis_triggered`/`crisis_resolved` via `/events`) | `audit_events` berisi `CRISIS_ENGAGED`/`CRISIS_DISMISSED` (cek §6) |
+| U11 | Web Vitals | Build dengan `VITE_OTEL_ENABLED=true`, buka app, cek Tempo | Span `web-vitals.<name>` (CLS/LCP/INP/FCP/TTFB) tercatat |
+
+> Verifikasi API untuk fitur yang sama (recall titles di SSE, dll.) tetap via curl di
+> §3–§6. UI items U1–U11 memetakan 1:1 ke perbaikan yang di-commit (`158cc2a` s.d.
+> `76328ed`).
+
+---
+
+## 8. Checklist hasil
 
 | # | Verifikasi | Command ref | Pass/Fail |
 |---|---|---|---|
@@ -207,9 +240,25 @@ cockroach sql --url "$CRDB_URL" --execute "
 | 11 | Audit `CLUSTER_HEALTH_CHECK` + `REFLECTION_RAN` di CRDB | §6 | ☐ |
 | 12 | `memory_nodes` kind='attachment' ada | §6 | ☐ |
 
+### Checklist UI (fitur pasca-audit)
+
+| # | Verifikasi | Langkah | Pass/Fail |
+|---|---|---|---|
+| U1 | Chip "Recalled N memories" muncul di balasan | §7 U1 | ☐ |
+| U2 | Chip judul recall tampil + navigasi ke `/memory` | §7 U2 | ☐ |
+| U3 | Chat restore dari backend (tanpa seed) setelah reload | §7 U3 | ☐ |
+| U4 | Galeri attachment list + delete | §7 U4 | ☐ |
+| U5 | Analytics (funnel/activity/retention) di `/metrics` | §7 U5 | ☐ |
+| U6 | Passkey sign-in balik ke profil sama | §7 U6 | ☐ |
+| U7 | Session expiry → redirect `/auth` | §7 U7 | ☐ |
+| U8 | Stop benar-benar menghentikan stream | §7 U8 | ☐ |
+| U9 | 429 rate-limit UX | §7 U9 | ☐ |
+| U10 | Crisis ter-mirror ke `audit_events` | §7 U10 | ☐ |
+| U11 | Web Vitals span di Tempo (opsional) | §7 U11 | ☐ |
+
 ---
 
-## 8. Catatan & workaround
+## 9. Catatan & workaround
 
 - **Payload Lambda**: gunakan `--payload fileb://` (file). `--payload '{"..."}'` dan
   `file://` di-mangle CLI v2 (error JSON); `--cli-binary-format raw-in-base64-out` juga gagal.
@@ -218,5 +267,8 @@ cockroach sql --url "$CRDB_URL" --execute "
   SSE/checksum header — itu bug `SignatureDoesNotMatch` yang sudah diperbaiki (commit `68a6dcb`).
 - **Frontend**: fitur on-device (MediaPipe face, prosody DSP, Whisper transcript) butuh
   kamera/mikro di browser; jalankan `npm run dev` di root lalu buka `http://localhost:5173`.
+  Untuk verifikasi UI pasca-audit gunakan checklist UI §8-U1..U11. Web Vitals
+  (span `web-vitals.*`) hanya aktif bila build frontend memakai `VITE_OTEL_ENABLED=true`
+  (default false) — cek Tempo/Grafana untuk span-nya.
 - **Cluster health**: ccloud CLI tidak ada di Lambda → REST fallback dipakai
   (`status UNSPECIFIED` pada cluster belum aktif — dianggap sehat, loop lanjut).

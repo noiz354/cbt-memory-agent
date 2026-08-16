@@ -130,11 +130,11 @@ lalu menyisipkan blok `CockroachDB Agent Skills Context` ke user prompt sebelum 
 | AWS Service #1: Lambda | ✅ Done | Deployed (ap-southeast-3) |
 | LLM + Embeddings: OpenRouter | ✅ Done | `lambda/lib/openrouter.ts` |
 | AWS Service #2: S3 | ✅ Done | Export bucket |
-| Manual verification (human tester) | ✅ Handoff | `docs/MANUAL-RUNBOOK.md` (12-item checklist) |
+| Manual verification (human tester) | ✅ Handoff | `docs/MANUAL-RUNBOOK.md` (12-item checklist API + UI checklist U1–U11 untuk 11 gap fix) |
 | Public Repo + MIT License | ✅ Done | Repo ini |
 | README + Setup Instructions | ⏳ Pending | Update di Workstream E |
 
 ---
 
 **Last Updated:** 2026-08-16  
-**Next Action:** (WS-E) update README tools matrix + demo script
+**Next Action:** (WS-E) update README tools matrix + demo script; human tester jalankan `docs/MANUAL-RUNBOOK.md` (checklist UI U1–U11) untuk 11 gap fix integrasi frontend-backend
