@@ -5,6 +5,10 @@ data "aws_ssm_parameter" "crdb_url" {
   name = "/${var.environment}/crdb/connection-url"
 }
 
+data "aws_ssm_parameter" "crdb_cluster_id" {
+  name = "/${var.environment}/crdb/cluster-id"
+}
+
 data "aws_ssm_parameter" "ccloud_api_key" {
   name = "/${var.environment}/ccloud/api-key"
 }
@@ -45,6 +49,7 @@ resource "aws_lambda_function" "this" {
     variables = {
       NODE_ENV                    = "production"
       CRDB_CONNECTION             = data.aws_ssm_parameter.crdb_url.value
+      CRDB_CLUSTER_ID             = data.aws_ssm_parameter.crdb_cluster_id.value
       CCLOUD_API_KEY              = data.aws_ssm_parameter.ccloud_api_key.value
       OPENROUTER_API_KEY          = data.aws_ssm_parameter.openrouter_api_key.value
       RESEND_API_KEY              = data.aws_ssm_parameter.resend_api_key.value

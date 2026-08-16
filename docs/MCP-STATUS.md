@@ -36,11 +36,56 @@
 write tetap lewat Lambda data-path (`pg.Pool`). Jika demo butuh write via MCP,
 ganti API key ke service account dengan peran write + consent di Cloud Console.
 
-### 2. Lambda MCP Client (deprecated — tidak dibuat)
+### 2. Lambda MCP Client (read-only, step 1.5 reflection) ✅
 
-**Status:** ❌ Tidak dibuat. Lambda memakai `pg.Pool` langsung (lihat
-`lambda/lib/crdb.ts`). Managed MCP adalah **agent tooling** (sesi development/
-triage), bukan data-plane aplikasi.
+**Status:** ✅ **Dibuat 2026-08-16** — `lambda/lib/mcp.ts` (fetch-based, stateless).
+Dipakai oleh reflection loop (`lambda/lib/reflection.ts`) sebagai "step 1.5": sebelum
+distilasi LLM, ambil core facts user yang sudah `verified=true` via MCP `select_query`
+(LIMIT 25) dan kirim sebagai konteks tambahan agar LLM tidak menduplikasi fakta yang
+sudah dikenal.
+
+- **Read-only:** hanya memanggil tool `select_query` (`database=defaultdb`). Semua write
+  tetap lewat `pg.Pool` (`lambda/lib/crdb.ts`).
+- **Resilience:** timeout `MCP_FETCH_TIMEOUT_MS` (default 5000ms) via AbortController;
+  semua failure (no-key, network, HTTP, timeout, parse) → `EMPTY_MCP_CONTEXT`, tidak pernah
+  menggagalkan reflection.
+- **Observability:** satu log `reflection.mcp_query` per panggilan (`userId`, `durationMs`,
+  `factsCount`, `success`) + `reflection.mcp_failed` pada gagal.
+- **Audit trail:** detail `audit_events` (REFLECTION_RAN) kini menyertakan
+  `mcp_context_used` + `mcp_facts_count` (ternormalisasi: true/n, true/0, false/0).
+- Referensi: `docs/15-8-26/PLAN-MCP-REFLECTION-STEP.md` · test `lambda/tests/mcp.test.ts`.
+- Live di produksi karena Lambda sudah punya `CCLOUD_API_KEY` (fallback ke
+  `CCLOUD_MCP_API_KEY` jika diset).
+
+### 3. Reflection health gate (cluster health) ✅
+
+**Status:** ✅ **Dibuat 2026-08-16** — `lambda/lib/clusterHealth.ts`. Sebelum memproses user,
+reflection loop mengecek status cluster CockroachDB Cloud; cluster terdegradasi (status selain
+`CREATED`/`UNSPECIFIED`) → seluruh run dibatalkan.
+
+- **Hybrid mechanism:** `ccloud cluster list -o json` (filter `.id` == `CRDB_CLUSTER_ID`) →
+  fallback REST `GET /api/v1/clusters/<id>` Bearer `CCLOUD_API_KEY ?? CCLOUD_MCP_API_KEY`.
+- **Resilience:** timeout `CCLOUD_HEALTH_TIMEOUT_MS` (default 10000ms) untuk ccloud (execFile) dan
+  REST (AbortController). Semua failure → `{healthy:true, skipped:true}` → loop lanjut. Tidak pernah
+  melempar.
+- **Audit trail:** `audit_events` type `CLUSTER_HEALTH_CHECK` (baru di migration
+  `schema/migration-2026-08-16-cluster-health-audit.sql`), `user_id=NULL` (event level cluster),
+  `detail = {status, nodeCount, healthy, reason?}`.
+- **Infra:** `CRDB_CLUSTER_ID` disuntik dari SSM `/hackathon/crdb/cluster-id` (main.tf data source).
+- Referensi: `docs/15-8-26/PLAN-CLUSTER-HEALTH-SKILLS.md` · test `lambda/tests/clusterHealth.test.ts`.
+
+### 4. Reflection agent skills injection ✅
+
+**Status:** ✅ **Dibuat 2026-08-16** — `lambda/lib/agentSkills.ts`. Reflection loop membaca 2 SKILL.md
+CockroachDB yang di-vendor (`cockroachdb-sql`, `profiling-statement-fingerprints`), truncate @ 500 chars,
+lalu menyisipkan blok `CockroachDB Agent Skills Context` ke user prompt sebelum LLM distillation.
+
+- **Paths:** dev/test `<repo>/skills/cockroachdb-skills/skills/<rel>`; bundled `/var/task/skills/...`
+  (Lambda zip — `scripts/build-lambda.sh` menyalin SKILL.md ke `dist/skills/` + zip `index.js skills`).
+- **Resilience:** file hilang → dilewati; semua hilang → `{content:"", names:[]}`. Tidak pernah melempar.
+- **Audit trail:** detail `REFLECTION_RAN` kini menyertakan `skills_used` (array) + `skills_injected`
+  (boolean).
+- Referensi: `docs/15-8-26/PLAN-CLUSTER-HEALTH-SKILLS.md` · test `lambda/tests/agentSkills.test.ts`.
 
 ---
 

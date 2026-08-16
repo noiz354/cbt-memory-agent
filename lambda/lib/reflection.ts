@@ -16,6 +16,11 @@ import { CrdbClient } from "./crdb";
 import { OpenRouterClient } from "./openrouter";
 import { writeNodeEmbedding } from "./vectorWriter";
 import { logger } from "./logger";
+import { fetchExistingCoreFacts, EMPTY_MCP_CONTEXT } from "./mcp";
+import type { McpContext } from "./mcp";
+import { checkClusterHealth } from "./clusterHealth";
+import { loadReflectionSkills } from "./agentSkills";
+import type { ReflectionSkills } from "./agentSkills";
 
 /** Faktur durable hasil ekstraksi LLM. */
 export interface ReflectionFact {
@@ -49,6 +54,17 @@ export async function runReflectionForActiveUsers(
   opts: { windowDays?: number; limitUsers?: number } = {},
 ): Promise<ReflectionResult> {
   const windowDays = opts.windowDays ?? REFLECT_WINDOW_DAYS;
+
+  // Addition A — health gate: skip seluruh run bila cluster terdegradasi.
+  const health = await checkClusterHealth(crdb);
+  if (!health.skipped && !health.healthy) {
+    logger.warn("reflection.cluster_unhealthy", "Reflection skipped — cluster degraded", {
+      status: health.status,
+      nodeCount: health.nodeCount,
+    });
+    return { userFacts: 0, errors: 0, skipped: 0, reflectedAt: new Date().toISOString() };
+  }
+
   const activeUsers = await crdb.query<{ user_id: string }>(
     `SELECT DISTINCT ct.user_id
      FROM chat_turns ct
@@ -92,10 +108,15 @@ export async function reflectUser(
   crdb: CrdbClient,
   llm: OpenRouterClient,
   userId: string,
-  opts: { windowDays?: number; maxTurns?: number } = {},
+  opts: {
+    windowDays?: number;
+    maxTurns?: number;
+    existingFactsProvider?: (userId: string) => Promise<McpContext>;
+  } = {},
 ): Promise<{ factsUpserted: number; skipped: number }> {
   const windowDays = opts.windowDays ?? REFLECT_WINDOW_DAYS;
   const maxTurns = opts.maxTurns ?? REFLECT_MAX_TURNS;
+  const provider = opts.existingFactsProvider ?? fetchExistingCoreFacts;
 
   const turns = await crdb.query<{ role: string; content: string }>(
     `SELECT role, content
@@ -110,7 +131,14 @@ export async function reflectUser(
   // Reverse → kronologis (kita ambil DESC, balikkan ke urutan asli).
   const chronological = [...turns].reverse();
 
-  const facts = await extractReflectionFacts(llm, chronological);
+  // Step 1.5: ambil core facts user yang sudah verified via MCP (read-only) sebagai
+  // konteks tambahan agar LLM tidak menduplikasi fakta yang sudah dikenal.
+  const mcpCtx = await provider(userId);
+
+  // Addition B: muat SKILL.md CockroachDB yang di-vendor sebagai konteks prompt.
+  const skills: ReflectionSkills = await loadReflectionSkills();
+
+  const facts = await extractReflectionFacts(llm, chronological, mcpCtx.facts, skills.content);
   if (facts.length === 0) return { factsUpserted: 0, skipped: 0 };
 
   let factsUpserted = 0;
@@ -118,7 +146,7 @@ export async function reflectUser(
 
   for (const fact of facts.slice(0, REFLECT_MAX_FACTS)) {
     try {
-      await upsertReflectionFact(crdb, llm, userId, fact);
+      await upsertReflectionFact(crdb, llm, userId, fact, mcpCtx, skills.names);
       factsUpserted += 1;
     } catch (err) {
       skipped += 1;
@@ -140,6 +168,8 @@ export async function reflectUser(
 export async function extractReflectionFacts(
   llm: OpenRouterClient,
   turns: { role: string; content: string }[],
+  existingFacts: { title: string; excerpt: string }[] = [],
+  skillsContent: string = "",
 ): Promise<ReflectionFact[]> {
   const transcript = turns
     .map((t) => `${t.role === "user" ? "User" : "Assistant"}: ${t.content.slice(0, 500)}`)
@@ -157,8 +187,18 @@ Requirements:
 - NEVER fabricate. Only facts clearly stated by the user.
 - Patterns/moods/themes count as durable facts (e.g. "prefers morning sessions", "struggles with sleep-onset anxiety").`;
 
+  const existingBlock = existingFacts.length
+    ? `\n\nAlready-known durable facts (DO NOT re-extract or duplicate these):\n${existingFacts
+        .map((f) => `- ${f.title}: ${f.excerpt}`)
+        .join("\n")}`
+    : "";
+
+  const skillsBlock = skillsContent ? `\n\n${skillsContent}` : "";
+
   const userPrompt = `Conversation (no PII expected):
 ${transcript}
+${existingBlock}
+${skillsBlock}
 
 Output JSON array of durable facts:`;
 
@@ -243,6 +283,8 @@ async function upsertReflectionFact(
   llm: OpenRouterClient,
   userId: string,
   fact: ReflectionFact,
+  mcpCtx: McpContext = EMPTY_MCP_CONTEXT,
+  skillsNames: string[] = [],
 ): Promise<void> {
   const id = await deterministicNodeId(crdb, userId, fact.title);
   const confidence = Math.min(1, Math.max(0, fact.confidence ?? REFLECT_MIN_CONFIDENCE));
@@ -267,11 +309,19 @@ async function upsertReflectionFact(
 
   await writeNodeEmbedding(crdb, llm, userId, { id, title: fact.title, excerpt: fact.excerpt, tags: fact.tags });
 
+  const detail = JSON.stringify({
+    factTitle: fact.title,
+    mcp_context_used: mcpCtx.used,
+    mcp_facts_count: mcpCtx.factsCount,
+    skills_used: skillsNames,
+    skills_injected: skillsNames.length > 0,
+  });
+
   await crdb.execute(
     `INSERT INTO audit_events (user_id, type, detail)
      VALUES ($2::uuid, $1, $3)
      ON CONFLICT DO NOTHING`,
-    [REFLECT_AUDIT_TYPE, userId, JSON.stringify({ factTitle: fact.title })],
+    [REFLECT_AUDIT_TYPE, userId, detail],
   );
 }
 
