@@ -63,8 +63,14 @@ resource "aws_iam_role_policy" "github_actions" {
           "s3:PutObject",
           "s3:DeleteObject",
           "s3:ListBucket",
+          "s3:ListBucketVersions",
           "s3:GetBucketVersioning",
-          "s3:GetBucketLocation"
+          "s3:GetBucketLocation",
+          "s3:GetBucketPolicy",
+          "s3:GetBucketAcl",
+          "s3:GetBucketTagging",
+          "s3:GetLifecycleConfiguration",
+          "s3:GetObjectVersion"
         ]
         Resource = [
           "arn:aws:s3:::cbt-memory-agent-terraform-state-apse3",
@@ -78,7 +84,10 @@ resource "aws_iam_role_policy" "github_actions" {
           "dynamodb:GetItem",
           "dynamodb:PutItem",
           "dynamodb:DeleteItem",
-          "dynamodb:DescribeTable"
+          "dynamodb:DescribeTable",
+          "dynamodb:DescribeContinuousBackups",
+          "dynamodb:DescribeTimeToLive",
+          "dynamodb:ListTagsOfResource"
         ]
         Resource = ["arn:aws:dynamodb:${var.aws_region}:${var.aws_account_id}:table/cbt-memory-agent-terraform-lock-apse3"]
       },
@@ -89,7 +98,11 @@ resource "aws_iam_role_policy" "github_actions" {
           "ssm:PutParameter",
           "ssm:GetParameter",
           "ssm:GetParameters",
-          "ssm:DeleteParameter"
+          "ssm:GetParametersByPath",
+          "ssm:DescribeParameters",
+          "ssm:DeleteParameter",
+          "ssm:AddTagsToResource",
+          "ssm:ListTagsForResource"
         ]
         Resource = ["arn:aws:ssm:${var.aws_region}:${var.aws_account_id}:parameter/${var.environment}/*"]
       },
@@ -102,6 +115,9 @@ resource "aws_iam_role_policy" "github_actions" {
           "lambda:UpdateFunctionConfiguration",
           "lambda:GetFunction",
           "lambda:GetFunctionConfiguration",
+          "lambda:GetPolicy",
+          "lambda:ListTags",
+          "lambda:ListVersionsByFunction",
           "lambda:PublishVersion",
           "lambda:AddPermission",
           "lambda:RemovePermission",
@@ -122,7 +138,9 @@ resource "aws_iam_role_policy" "github_actions" {
           "logs:CreateLogGroup",
           "logs:DescribeLogGroups",
           "logs:PutRetentionPolicy",
-          "logs:DeleteLogGroup"
+          "logs:DeleteLogGroup",
+          "logs:ListTagsForResource",
+          "logs:GetLogEvents"
         ]
         Resource = ["arn:aws:logs:${var.aws_region}:${var.aws_account_id}:log-group:/aws/lambda/${var.function_name}:*"]
       },
@@ -137,9 +155,15 @@ resource "aws_iam_role_policy" "github_actions" {
           "s3:GetBucketPolicy",
           "s3:PutBucketPolicy",
           "s3:DeleteBucketPolicy",
+          "s3:GetBucketAcl",
+          "s3:GetBucketTagging",
+          "s3:GetBucketOwnershipControls",
+          "s3:GetBucketPublicAccessBlock",
+          "s3:ListBucketVersions",
           "s3:PutBucketVersioning",
           "s3:PutBucketEncryption",
           "s3:GetBucketEncryption",
+          "s3:GetObjectTagging",
           "s3:PutObject",
           "s3:GetObject",
           "s3:DeleteObject",
@@ -170,6 +194,7 @@ resource "aws_iam_role_policy" "github_actions" {
           "cloudfront:DeleteOriginAccessControl",
           "cloudfront:GetOriginAccessControl",
           "cloudfront:ListOriginAccessControls",
+          "cloudfront:ListTagsForResource",
           "cloudfront:CreateCachePolicy",
           "cloudfront:UpdateCachePolicy",
           "cloudfront:DeleteCachePolicy",
@@ -196,6 +221,10 @@ resource "aws_iam_role_policy" "github_actions" {
           "iam:GetRolePolicy",
           "iam:DeleteRolePolicy",
           "iam:ListRolePolicies",
+          "iam:ListAttachedRolePolicies",
+          "iam:GetPolicy",
+          "iam:GetPolicyVersion",
+          "iam:ListPolicyVersions",
           "iam:TagRole"
         ]
         Resource = [
@@ -233,6 +262,7 @@ resource "aws_iam_role_policy" "github_actions" {
           "events:PutTargets",
           "events:RemoveTargets",
           "events:ListTargetsByRule",
+          "events:ListTagsForResource",
           "events:TagResource",
           "events:UntagResource"
         ]
@@ -248,7 +278,10 @@ resource "aws_iam_role_policy" "github_actions" {
           "budgets:UpdateBudget",
           "budgets:DeleteBudget",
           "cloudwatch:PutMetricData",
-          "cloudwatch:GetMetricData"
+          "cloudwatch:GetMetricData",
+          "cloudwatch:DescribeAlarms",
+          "cloudwatch:ListMetrics",
+          "cloudwatch:ListTagsForResource"
         ]
         Resource = ["*"]
       }
