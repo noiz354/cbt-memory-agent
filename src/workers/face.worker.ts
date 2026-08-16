@@ -10,12 +10,21 @@
 
 import { FaceLandmarker, FilesetResolver } from "@mediapipe/tasks-vision";
 
-export interface FaceWorkerIn {
+export interface FaceWorkerFrameIn {
   type: "frame";
   width: number;
   height: number;
   buffer: ArrayBuffer;
 }
+
+export interface FaceWorkerAnalyzeIn {
+  type: "analyze";
+  width: number;
+  height: number;
+  buffer: ArrayBuffer;
+}
+
+export type FaceWorkerIn = FaceWorkerFrameIn | FaceWorkerAnalyzeIn;
 
 export interface FaceWorkerOut {
   type: "signal";
@@ -116,6 +125,44 @@ function fallbackSignal(pixels: Uint8ClampedArray): FaceWorkerOut {
 }
 
 self.onmessage = (event: MessageEvent<FaceWorkerIn>) => {
+  if (event.data.type === "analyze") {
+    // One-shot analysis for media attachments (snapshots / video timeline):
+    // ensure the model is warm so the result is a real MediaPipe classification,
+    // not the first-frame luma fallback.
+    const pixels = new Uint8ClampedArray(event.data.buffer);
+    const analyze = async () => {
+      if (initPromise) await initPromise;
+      if (!landmarker && !initPromise) {
+        initPromise = initModel().finally(() => {
+          initPromise = null;
+        });
+        await initPromise;
+      }
+      if (modelMode === "mediapipe" && landmarker) {
+        try {
+          const imageData = new ImageData(pixels, event.data.width, event.data.height);
+          const result = landmarker.detect(imageData);
+          const face = result?.faceLandmarks?.[0];
+          if (face) {
+            const { expression, confidence } = classifyBlendshapes(result);
+            self.postMessage({
+              type: "signal",
+              expression,
+              confidence,
+              updatedAt: Date.now(),
+              model: "mediapipe",
+            } satisfies FaceWorkerOut);
+            return;
+          }
+        } catch {
+          // fall through to fallback
+        }
+      }
+      self.postMessage(fallbackSignal(pixels));
+    };
+    void analyze();
+    return;
+  }
   if (event.data.type !== "frame") return;
   const pixels = new Uint8ClampedArray(event.data.buffer);
 

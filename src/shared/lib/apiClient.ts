@@ -68,7 +68,7 @@ export interface ChatTurnResponse {
 
 export interface MemoryNode {
   id: string;
-  kind: "core" | "transcript";
+  kind: "core" | "transcript" | "attachment";
   title: string;
   excerpt?: string;
   tags?: string[];
@@ -136,6 +136,45 @@ export interface HealthResponse {
   llm: string;
   s3: string;
   version: string;
+}
+
+export type AttachmentKind = "image" | "video" | "audio";
+
+export interface AttachmentAnalysisInput {
+  kind: AttachmentKind;
+  analysis: Record<string, unknown>;
+  embeddedNarrative: string;
+  s3Key: string;
+  title: string;
+  confidence?: number;
+  mimeType?: string;
+  sizeBytes?: number;
+  durationMs?: number;
+  frameCount?: number;
+  sessionId?: string;
+  turnId?: string;
+}
+
+export interface PresignResponse {
+  v: 1;
+  key: string;
+  uploadUrl: string;
+}
+
+export interface CreateAttachmentResponse {
+  v: 1;
+  ok: true;
+  nodeId: string;
+  attachmentId: string;
+}
+
+export interface AttachmentListItem {
+  id: string;
+  kind: AttachmentKind;
+  title: string;
+  excerpt?: string;
+  embeddedNarrative?: string;
+  createdAt?: string;
 }
 
 // ─────────────────────────────────────────────
@@ -357,4 +396,52 @@ export const apiClient = {
 
   /** GET /health — Health check. */
   health: () => api<HealthResponse>("/health"),
+
+  /** POST /attachments/presign — Presigned PUT URL untuk raw media. */
+  presignMedia: (
+    body: { v: 1; kind: AttachmentKind; ext?: string; mimeType?: string },
+    token: string,
+    deviceId: string,
+  ) =>
+    api<PresignResponse>("/attachments/presign", {
+      method: "POST",
+      token,
+      deviceId,
+      body: JSON.stringify(body),
+    }),
+
+  /** PUT raw blob langsung ke S3 memakai presigned URL. */
+  uploadMediaToS3: async (uploadUrl: string, blob: Blob, mimeType?: string): Promise<void> => {
+    const res = await fetch(uploadUrl, {
+      method: "PUT",
+      headers: mimeType ? { "Content-Type": mimeType } : undefined,
+      body: blob,
+    });
+    if (!res.ok) throw new Error(`S3 upload ${res.status}: ${res.statusText}`);
+  },
+
+  /** POST /attachments — Simpan memory node kind=attachment + analysis. */
+  createAttachment: (
+    body: { v: 1; attachment: AttachmentAnalysisInput },
+    token: string,
+    deviceId: string,
+  ) =>
+    api<CreateAttachmentResponse>("/attachments", {
+      method: "POST",
+      token,
+      deviceId,
+      body: JSON.stringify(body),
+    }),
+
+  /** GET /attachments — Daftar attachment user. */
+  listAttachments: (token: string, deviceId: string) =>
+    api<{ v: 1; attachments: AttachmentListItem[] }>("/attachments", { token, deviceId }),
+
+  /** DELETE /attachments/:id — Hapus raw S3 + node (cascade). */
+  deleteAttachment: (id: string, token: string, deviceId: string) =>
+    api<{ v: 1; ok: true; deletedId: string }>(`/attachments/${id}`, {
+      method: "DELETE",
+      token,
+      deviceId,
+    }),
 };

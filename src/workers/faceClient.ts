@@ -77,3 +77,50 @@ export function stopFaceWorker() {
   worker?.terminate();
   worker = null;
 }
+
+// Dedicated one-shot analysis worker for media attachments (snapshots, video
+// timeline). Kept warm (model stays loaded) so successive frames classify
+// against real MediaPipe instead of the luma fallback.
+let analyzerWorker: Worker | null = null;
+const analyzerQueue: {
+  resolve: (signal: FaceSignal) => void;
+  reject: (err: Error) => void;
+}[] = [];
+
+/**
+ * Run face-expression classification on a single frame (one-shot).
+ * Used by the image-snapshot and video-timeline attachment pipelines.
+ * Returns a promise that resolves with the FaceSignal for that frame.
+ */
+export function analyzeFrame(frame: ImageData): Promise<FaceSignal> {
+  if (!analyzerWorker) {
+    analyzerWorker = new Worker(new URL("./face.worker.ts", import.meta.url), { type: "module" });
+    analyzerWorker.onmessage = (event: MessageEvent<FaceWorkerOut>) => {
+      if (event.data.type !== "signal") return;
+      const pending = analyzerQueue.shift();
+      pending?.resolve({
+        expression: event.data.expression,
+        confidence: event.data.confidence,
+        updatedAt: event.data.updatedAt,
+        model: event.data.model,
+      });
+    };
+  }
+
+  return new Promise<FaceSignal>((resolve, reject) => {
+    analyzerQueue.push({ resolve, reject });
+    const buffer = frame.data.buffer.slice(0); // copy — caller may reuse the canvas
+    analyzerWorker?.postMessage(
+      { type: "analyze", width: frame.width, height: frame.height, buffer },
+      [buffer],
+    );
+  });
+}
+
+/** Terminate the one-shot analyzer (releases the MediaPipe model). */
+export function stopAnalyzeWorker() {
+  analyzerWorker?.terminate();
+  analyzerWorker = null;
+  for (const pending of analyzerQueue) pending.reject(new Error("Face analyzer terminated."));
+  analyzerQueue.length = 0;
+}
