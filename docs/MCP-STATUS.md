@@ -72,6 +72,9 @@ reflection loop mengecek status cluster CockroachDB Cloud; cluster terdegradasi 
   `schema/migration-2026-08-16-cluster-health-audit.sql`), `user_id=NULL` (event level cluster),
   `detail = {status, nodeCount, healthy, reason?}`.
 - **Infra:** `CRDB_CLUSTER_ID` disuntik dari SSM `/hackathon/crdb/cluster-id` (main.tf data source).
+- **Live (2026-08-16):** `terraform apply` (Lambda v18) + migration CRDB live. Invoke reflect →
+  log `reflection.cluster_health` (`status UNSPECIFIED, nodeCount 0, healthy:true` — REST fallback)
+  + audit row `CLUSTER_HEALTH_CHECK` (`user_id` NULL, detail `{status,nodeCount,healthy}`) terverifikasi.
 - Referensi: `docs/15-8-26/PLAN-CLUSTER-HEALTH-SKILLS.md` · test `lambda/tests/clusterHealth.test.ts`.
 
 ### 4. Reflection agent skills injection ✅
@@ -106,6 +109,12 @@ lalu menyisipkan blok `CockroachDB Agent Skills Context` ke user prompt sebelum 
   `prosody.worker.ts` (pitch autocorrelation, pause, wpm), `faceClient.analyzeFrame()` one-shot,
   `attachmentIndex.ts` orchestration; UI di CameraPip/VideoRecorderPip/HoldToTalkOrb/Composer.
 - **Privacy:** raw media stays in-browser; hanya clinical summary + upload eksplisit yang sinkron.
+- **Live (2026-08-16):** migration CRDB live (tabel `attachments` + kind CHECK `'attachment'`
+  terverifikasi), `terraform apply` (Lambda v19, IAM `s3:DeleteObject/DeleteObjects`). Live E2E:
+  presign → **S3 PUT 200** → create (node `verified=true` + attachments + embeddings) → list →
+  delete (S3 object terhapus + cascade). Fix presigned PUT signature (commit `68a6dcb`):
+  drop `x-amz-server-side-encryption` (bucket AES256 at-rest) + `requestChecksumCalculation:
+  "WHEN_REQUIRED"` — SDK v3.800 signer mismatch saat klien browser/curl PUT polos.
 - Referensi: `docs/15-8-26/PLAN-EMOTIONAL-ATTACHMENTS.md` · `ADR-007` · test `lambda/tests/attachments.test.ts`.
 
 ---
