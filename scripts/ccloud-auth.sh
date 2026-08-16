@@ -45,7 +45,7 @@ MCP_URL="https://cockroachlabs.cloud/mcp"
 # ─── Mode: device-code flow (ccloud CLI) ─────────────────────────────────────
 device_code_mode() {
   if ! command -v ccloud &> /dev/null; then
-    log_error "ccloud CLI not found. Install: curl -fsSL https://binaries.cockroachdb.com/ccloud | bash"
+    log_error "ccloud CLI not found. Install (Linux): curl -fsSL https://binaries.cockroachdb.com/ccloud/ccloud_linux-amd64_0.6.12.tar.gz | tar -xz && sudo cp ccloud /usr/local/bin/"
     exit 1
   fi
 

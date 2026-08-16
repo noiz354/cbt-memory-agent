@@ -42,6 +42,16 @@ jobs:
           npm ci
           npm run typecheck
 
+      - name: Install ccloud CLI
+        run: |
+          if ! command -v ccloud &> /dev/null; then
+            curl -fsSL https://binaries.cockroachdb.com/ccloud/ccloud_linux-amd64_0.6.12.tar.gz -o /tmp/ccloud.tar.gz
+            tar -xzf /tmp/ccloud.tar.gz -C /tmp
+            chmod +x /tmp/ccloud
+            echo "/tmp" >> "$GITHUB_PATH"
+          fi
+          ccloud --version
+
       - name: CockroachDB Cloud audit (ccloud CLI health gate)
         run: |
           bash scripts/ccloud-audit.sh --quiet

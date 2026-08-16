@@ -16,8 +16,10 @@
 #   1  satu atau lebih check gagal
 #
 # Prerequisites:
-#   - ccloud CLI ter-install & sudah `ccloud auth login` (atau CCLOUD_API_KEY di .env)
 #   - jq ter-install (untuk parse JSON output)
+#   - ccloud CLI ter-install & `ccloud auth login` (memakai pola `-o json`);
+#     bila belum login, audit otomatis fallback ke REST v1 dengan CCLOUD_API_KEY
+#     (cocok untuk CI headless) — pola `-o json` + jq tetap dipakai di kedua jalur.
 # ─────────────────────────────────────────────────────────────────────────────
 
 set -euo pipefail
@@ -36,10 +38,24 @@ load_env_var() {
 CRDB_CLUSTER_NAME="${CRDB_CLUSTER_NAME:-$(load_env_var CRDB_CLUSTER_NAME)}"
 CRDB_CLUSTER_NAME="${CRDB_CLUSTER_NAME:-woozy-grivet}"
 CCLOUD_API_KEY="${CCLOUD_API_KEY:-$(load_env_var CCLOUD_API_KEY)}"
+API_BASE="https://cockroachlabs.cloud/api/v1"
 MCP_URL="https://cockroachlabs.cloud/mcp"
 MODE="${1:-default}"
 CLUSTER_NAME="$CRDB_CLUSTER_NAME"
 FAILED=0
+
+# ─── Sumber data cluster ────────────────────────────────────────────────────
+# Pakai `ccloud cluster list -o json` bila CLI terinstall & sudah login;
+# fallback REST v1 (Bearer CCLOUD_API_KEY) untuk CI headless yang belum login.
+# Keduanya mengembalikan ARRAY JSON cluster (kontrak `-o json` + jq).
+get_clusters_json() {
+  if command -v ccloud &> /dev/null && ccloud auth whoami &> /dev/null 2>&1; then
+    ccloud cluster list -o json 2>/dev/null || true
+  elif [[ -n "${CCLOUD_API_KEY:-}" ]]; then
+    curl -s --max-time 15 -H "Authorization: Bearer $CCLOUD_API_KEY" "$API_BASE/clusters" \
+      | jq -c '.clusters // []' 2>/dev/null || true
+  fi
+}
 
 log_info() { echo -e "[*] $1"; }
 log_ok()   { echo -e "[✓] $1"; }
@@ -58,7 +74,19 @@ check() {
 # ─── Sinkronkan: pastikan auth tersedia ──────────────────────────────────────
 ensure_auth() {
   if ! command -v ccloud &> /dev/null; then
-    check "ccloud CLI terinstall" "FAIL (command not found)"
+    if [[ -n "${CCLOUD_API_KEY:-}" ]]; then
+      local status
+      status=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
+        -H "Authorization: Bearer $CCLOUD_API_KEY" \
+        "$API_BASE/clusters" 2>/dev/null || echo "000")
+      if [[ "$status" == "200" ]]; then
+        log_ok "ccloud CLI tidak ada, tapi CCLOUD_API_KEY valid (REST v1)."
+        return 0
+      fi
+      check "Auth REST v1" "FAIL (status=$status)"
+      return 1
+    fi
+    check "ccloud CLI terinstall" "FAIL (command not found — install: curl -fsSL https://binaries.cockroachdb.com/ccloud/ccloud_linux-amd64_0.6.12.tar.gz | tar -xz && sudo cp ccloud /usr/local/bin/)"
     return 1
   fi
   # Jika belum terauth, coba API key dari .env via REST v1 fallback
@@ -67,7 +95,7 @@ ensure_auth() {
       local status
       status=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
         -H "Authorization: Bearer $CCLOUD_API_KEY" \
-        "https://cockroachlabs.cloud/api/v1/clusters" 2>/dev/null || echo "000")
+        "$API_BASE/clusters" 2>/dev/null || echo "000")
       if [[ "$status" == "200" ]]; then
         log_ok "ccloud CLI belum login, tapi CCLOUD_API_KEY valid (REST v1)."
         return 0
@@ -84,13 +112,13 @@ ensure_auth() {
 # ─── Audit utama ─────────────────────────────────────────────────────────────
 run_audit() {
   local clusters_json
-  clusters_json=$(ccloud cluster list -o json 2>/dev/null)
+  clusters_json=$(get_clusters_json)
 
   local cluster_json
   cluster_json=$(printf '%s' "$clusters_json" | jq -c --arg n "$CLUSTER_NAME" '.[] | select(.name == $n)' | head -1)
 
   if [[ -z "$cluster_json" ]]; then
-    check "Cluster $CLUSTER_NAME ditemukan" "FAIL (tidak ada di ccloud cluster list)"
+    check "Cluster $CLUSTER_NAME ditemukan" "FAIL (tidak ada di cluster list)"
     return 1
   fi
 
@@ -105,16 +133,21 @@ run_audit() {
   check "Cluster state=$state" "$([[ "$state" == "CREATED" || "$state" == "UNSPECIFIED" ]] && echo OK || echo "state=$state")"
   check "CockroachDB version=$version" "OK"
   check "Region=$region" "OK"
-  check "Spend limit USD" "$([[ "$spend_limit" == "0" || "$spend_limit" == "0.0" ]] && echo OK || echo "spend_limit=$spend_limit (bukan 0)")"
+  # spend_limit hanya ada di respons ccloud CLI; REST v1 → N/A → dianggap OK
+  check "Spend limit USD" "$([[ "$spend_limit" == "0" || "$spend_limit" == "0.0" || "$spend_limit" == "N/A" || "$spend_limit" == "null" ]] && echo OK || echo "spend_limit=$spend_limit (bukan 0)")"
 
-  # 2. Koneksi SQL (satu query ringan)
+  # 2. Koneksi SQL (satu query ringan) — hanya bila ccloud sudah login
   if command -v psql &> /dev/null || command -v cockroach &> /dev/null; then
-    local sql_result
-    sql_result=$(ccloud cluster sql "$CLUSTER_NAME" -c "SELECT 1 AS ok" 2>&1 || true)
-    if [[ "$sql_result" == *"1"* || "$sql_result" == *"ok"* ]]; then
-      check "Koneksi SQL SELECT 1" "OK"
+    if ccloud auth whoami &> /dev/null 2>&1; then
+      local sql_result
+      sql_result=$(ccloud cluster sql "$CLUSTER_NAME" -c "SELECT 1 AS ok" 2>&1 || true)
+      if [[ "$sql_result" == *"1"* || "$sql_result" == *"ok"* ]]; then
+        check "Koneksi SQL SELECT 1" "OK"
+      else
+        check "Koneksi SQL SELECT 1" "FAIL ($(printf '%s' "$sql_result" | head -c 120))"
+      fi
     else
-      check "Koneksi SQL SELECT 1" "FAIL ($(printf '%s' "$sql_result" | head -c 120))"
+      log_info "[~] ccloud belum login — skip check SQL shell (pakai MCP select_query sebagai ganti)"
     fi
   else
     log_info "[~] psql/cockroach tidak ada — skip check SQL shell (pakai MCP select_query sebagai ganti)"
@@ -142,7 +175,7 @@ run_audit() {
 # ─── Output ──────────────────────────────────────────────────────────────────
 if [[ "$MODE" == "--json" ]]; then
   # Output JSON terstruktur (agent-ready). Cek yang sama, tulis JSON hasil.
-  clusters_json2=$(ccloud cluster list -o json 2>/dev/null)
+  clusters_json2=$(get_clusters_json)
   cluster_json2=$(printf '%s' "$clusters_json2" | jq -c --arg n "$CLUSTER_NAME" '.[] | select(.name == $n)' | head -1)
   if [[ -n "$cluster_json2" ]]; then
     printf '%s' "$cluster_json2" | jq '{
