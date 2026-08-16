@@ -105,7 +105,10 @@ export async function withSpan<T>(
   fn: (span: Span) => Promise<T>,
   opts: SpanOptions = {},
 ): Promise<T> {
-  if (!tracerProvider) return fn(trace.getSpan(context.active()) ?? ({} as Span));
+  // Always create the span via the tracer. When telemetry is disabled (no provider
+  // registered), getTracer() returns the NoopTracer whose startSpan yields a
+  // NonRecordingSpan — every Span method is a safe no-op. Never pass a bare {}
+  // here: callers (e.g. onDeviceLLM) call span.setAttribute and would throw.
   const tracer = getTracer();
   const span = tracer.startSpan(name, { attributes: opts.attributes ?? {} });
   const ctx: Context = trace.setSpan(context.active(), span);
