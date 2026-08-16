@@ -1,14 +1,20 @@
-name: Deploy Backend
+name: Deploy Backend + Frontend
 on:
   push:
     branches: [main]
     paths:
       - 'lambda/**'
       - 'infra/**'
+      - 'src/**'
+      - '.github/workflows/deploy.yml'
+      - 'scripts/**'
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write # OIDC assume role
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
@@ -36,9 +42,6 @@ jobs:
           npm ci
           npm run typecheck
 
-      - name: Build (frontend)
-        run: npm run build
-
       - name: CockroachDB Cloud audit (ccloud CLI health gate)
         run: |
           bash scripts/ccloud-audit.sh --quiet
@@ -49,11 +52,10 @@ jobs:
       - name: Build Lambda zip
         run: bash scripts/build-lambda.sh
 
-      - name: Configure AWS credentials
+      - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ secrets.AWS_REGION }}
 
       - name: Setup Terraform
@@ -72,9 +74,25 @@ jobs:
           TF_VAR_crdb_cluster_id: ${{ secrets.CRDB_CLUSTER_ID }}
           TF_VAR_ccloud_api_key: ${{ secrets.CCLOUD_API_KEY }}
           TF_VAR_openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          TF_VAR_resend_api_key: ${{ secrets.RESEND_API_KEY }}
+          TF_VAR_email_from: ${{ secrets.EMAIL_FROM }}
+          TF_VAR_app_url: ${{ secrets.APP_URL }}
           TF_VAR_allowed_origin: ${{ secrets.ALLOWED_ORIGIN }}
+          TF_VAR_grafana_otlp_endpoint: ${{ secrets.GRAFANA_OTLP_ENDPOINT }}
+          TF_VAR_grafana_otlp_headers: ${{ secrets.GRAFANA_OTLP_HEADERS }}
 
-      - name: Health check
+      - name: Deploy frontend (S3 + CloudFront)
+        run: bash scripts/deploy-frontend.sh
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+
+      - name: Health check (backend)
         run: |
-          sleep 30
+          sleep 20
           curl -f ${{ secrets.API_URL }}/api/v1/health || exit 1
+
+      - name: Health check (frontend via CloudFront)
+        run: |
+          sleep 20
+          curl -f ${{ secrets.APP_URL }}/ || exit 1
+          curl -f ${{ secrets.APP_URL }}/api/v1/health || exit 1
