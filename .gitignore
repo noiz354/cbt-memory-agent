@@ -67,3 +67,4 @@ lambda/.esbuild/
 # Local runtime
 cockroach-v26.2.5.linux-amd64/
 cockroach-data/
+reverse-prompt-aws-cockroachdb.md
