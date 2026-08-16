@@ -53,7 +53,7 @@ jobs:
             chmod +x /tmp/ccloud-cli/ccloud
             echo "/tmp/ccloud-cli" >> "$GITHUB_PATH"
           fi
-          ccloud --version || /tmp/ccloud-cli/ccloud --version
+          ccloud version || /tmp/ccloud-cli/ccloud version
 
       - name: CockroachDB Cloud audit (ccloud CLI health gate)
         run: |
