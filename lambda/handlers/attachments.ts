@@ -88,7 +88,9 @@ export async function handlePresignAttachment(
   }
 
   const kind = body.kind as AttachmentKind | undefined;
-  const ext = body.ext ?? (kind === "image" ? "jpg" : kind === "video" ? "webm" : "webm");
+  // ext dipakai di key S3 — validasi biar tidak ada karakter path/malformed.
+  const rawExt = body.ext ?? (kind === "image" ? "jpg" : "webm");
+  const ext = /^[a-zA-Z0-9]{1,8}$/.test(rawExt) ? rawExt : "bin";
   if (!kind || !VALID_KINDS.includes(kind)) {
     return badRequest(`Expected kind in ${VALID_KINDS.join(", ")}`);
   }
@@ -267,7 +269,7 @@ export async function handleDeleteAttachment(
     const row = await crdb.queryOne<{ s3_key: string | null }>(
       `SELECT a.s3_key FROM attachments a
        JOIN memory_nodes mn ON mn.id = a.memory_node_id
-       WHERE a.id::string = $1 AND a.user_id = $2::uuid`,
+       WHERE a.memory_node_id::string = $1 AND a.user_id = $2::uuid`,
       [id, userId],
     );
     if (!row) {

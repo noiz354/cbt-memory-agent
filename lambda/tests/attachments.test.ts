@@ -252,6 +252,21 @@ describe("attachments — delete", () => {
     expect(crdb.executes.some((c: ExecuteCall) => c.sql.includes("DELETE FROM memory_nodes"))).toBe(true);
   });
 
+  it("matches the attachment by memory node id (client deletes by nodeId)", async () => {
+    const crdb = crdbMock();
+    crdb.queryOne = vi
+      .fn()
+      .mockResolvedValueOnce({ user_id: USER }) // getUserId
+      .mockResolvedValueOnce({ s3_key: `media/${USER}/abc123.jpg` });
+    const s3 = s3Mock();
+    await handleDeleteAttachment("node-42", crdb, s3, "tok-1", "dev-1");
+    const calls = (crdb.queryOne as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls[calls.length - 1]).toEqual([
+      expect.stringContaining("memory_node_id::string = $1"),
+      ["node-42", USER],
+    ]);
+  });
+
   it("deletes node even when S3 object missing (best-effort)", async () => {
     const crdb = crdbMock();
     crdb.queryOne = vi.fn(async () => ({ s3_key: null }));

@@ -160,7 +160,9 @@ self.onmessage = (event: MessageEvent<FaceWorkerIn>) => {
       }
       self.postMessage(fallbackSignal(pixels));
     };
-    void analyze();
+    void analyze().catch(() => {
+      self.postMessage(fallbackSignal(pixels));
+    });
     return;
   }
   if (event.data.type !== "frame") return;
