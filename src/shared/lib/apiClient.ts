@@ -64,6 +64,8 @@ export interface ChatTurnResponse {
   assistantMessage: string;
   tokensUsed: number;
   latencyMs: number;
+  /** Memory IDs the backend injected into this turn (from the final SSE event). */
+  injectedMemoryIds?: string[];
 }
 
 export interface MemoryNode {
@@ -229,6 +231,17 @@ export const apiClient = {
             try {
               const json = JSON.parse(trimmed.slice(6));
               const delta = json.t ?? "";
+              if (Array.isArray(json.injectedMemoryIds)) {
+                onChunk("", true);
+                return {
+                  v: 1,
+                  turnId: "",
+                  assistantMessage: fullContent,
+                  tokensUsed: 0,
+                  latencyMs: 0,
+                  injectedMemoryIds: json.injectedMemoryIds as string[],
+                };
+              }
               if (delta) {
                 fullContent += delta;
                 onChunk(delta, false);

@@ -45,6 +45,8 @@ export interface LLMResponse {
 export interface LLMStreamChunk {
   delta: string;
   done: boolean;
+  /** Memory IDs the backend injected into this turn (from the final SSE event). */
+  injectedMemoryIds?: string[];
 }
 
 export type LLMStreamCallback = (chunk: LLMStreamChunk) => void;
@@ -256,6 +258,14 @@ async function parseBackendProxySSE(
           try {
             const json = JSON.parse(trimmed.slice(6));
             const delta = json.t ?? "";
+            // Final event: {"t":"","injectedMemoryIds":[...]} — backend recall evidence.
+            if (Array.isArray(json.injectedMemoryIds)) {
+              onStream({
+                delta: "",
+                done: false,
+                injectedMemoryIds: json.injectedMemoryIds as string[],
+              });
+            }
             if (delta) {
               fullContent += delta;
               onStream({ delta, done: false });

@@ -27,6 +27,8 @@ export interface ChatMessage {
   quotedFromId?: string;
   attachments?: ChatAttachment[];
   injectedMemories?: InjectedMemory[];
+  /** Memory IDs the backend injected into this turn (from SSE final event). */
+  recalledMemoryIds?: string[];
   audio?: {
     durationMs: number;
     peaks: number[];

@@ -43,6 +43,7 @@ interface ChatState {
   sendMessage: (content?: string, audio?: { durationMs: number; peaks: number[]; src: string }) => void;
   appendStreamToken: (token: string) => void;
   finishStream: () => void;
+  recordBackendRecall: (memoryIds: string[]) => void;
   setCameraOpen: (open: boolean) => void;
   setFace: (face: FaceSignal) => void;
   setRecording: (recording: boolean) => void;
@@ -217,6 +218,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
         let fullResponse = "";
 
         await callLLMWithFallback(messages, (chunk) => {
+          if (chunk.injectedMemoryIds && chunk.injectedMemoryIds.length > 0) {
+            get().recordBackendRecall(chunk.injectedMemoryIds);
+          }
           if (!chunk.done) {
             fullResponse += chunk.delta;
             get().appendStreamToken(chunk.delta);
@@ -278,6 +282,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
       isStreaming: false,
       messages: s.messages.map((m) =>
         m.streaming ? { ...m, streaming: false } : m,
+      ),
+    })),
+  recordBackendRecall: (memoryIds) =>
+    set((s) => ({
+      messages: s.messages.map((m, i) =>
+        i === s.messages.length - 1 && m.streaming
+          ? { ...m, recalledMemoryIds: memoryIds }
+          : m,
       ),
     })),
   setCameraOpen: (cameraOpen) => set({ cameraOpen }),
