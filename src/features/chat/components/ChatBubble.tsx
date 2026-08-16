@@ -89,6 +89,21 @@ export function ChatBubble({ message }: ChatBubbleProps) {
           </div>
         )}
 
+        {!isUser && !isSystem && message.recalledTitles && message.recalledTitles.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            {message.recalledTitles.map((title, idx) => (
+              <Link
+                key={`${title}-${idx}`}
+                to="/memory"
+                className="inline-flex items-center gap-1 rounded-full bg-teal-mist px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-teal"
+              >
+                <Sparkles className="size-3" />
+                Recalled · {title}
+              </Link>
+            ))}
+          </div>
+        )}
+
         {!isUser && !isSystem && message.recalledMemoryIds && message.recalledMemoryIds.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-1.5">
             <span className="inline-flex items-center gap-1 rounded-full bg-ink/5 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-ink-mute">

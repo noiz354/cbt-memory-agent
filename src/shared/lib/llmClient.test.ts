@@ -67,6 +67,24 @@ describe("callLLM backend-proxy SSE", () => {
     expect(chunks.every((c) => !c.injectedMemoryIds)).toBe(true);
   });
 
+  it("emits a chunk with recalledTitles from the final SSE event", async () => {
+    const sse =
+      'data: {"t":"Recalling...","injectedMemoryIds":["mem-1","mem-2"],"recalledTitles":["Cemas sebelum tidur","Makan sehat"]}\n\n' +
+      "data: [DONE]\n\n";
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(sseResponse(sse)));
+
+    const chunks: LLMStreamChunk[] = [];
+    await callLLM(
+      { providerId: "backend-proxy", messages: [{ role: "user", content: "hi" }] },
+      (chunk) => chunks.push(chunk),
+    );
+
+    const recall = chunks.find((c) => c.recalledTitles);
+    expect(recall).toBeDefined();
+    expect(recall!.recalledTitles).toEqual(["Cemas sebelum tidur", "Makan sehat"]);
+  });
+
   it("throws on non-ok HTTP status", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(sseResponse("nope", 502)));
     await expect(

@@ -66,6 +66,8 @@ export interface ChatTurnResponse {
   latencyMs: number;
   /** Memory IDs the backend injected into this turn (from the final SSE event). */
   injectedMemoryIds?: string[];
+  /** Titles of the memories the backend recalled for this turn (final SSE event). */
+  recalledTitles?: string[];
 }
 
 export interface MemoryNode {
@@ -240,6 +242,9 @@ export const apiClient = {
                   tokensUsed: 0,
                   latencyMs: 0,
                   injectedMemoryIds: json.injectedMemoryIds as string[],
+                  recalledTitles: Array.isArray(json.recalledTitles)
+                    ? (json.recalledTitles as string[])
+                    : undefined,
                 };
               }
               if (delta) {

@@ -29,6 +29,8 @@ export interface ChatMessage {
   injectedMemories?: InjectedMemory[];
   /** Memory IDs the backend injected into this turn (from SSE final event). */
   recalledMemoryIds?: string[];
+  /** Titles of the memories the backend recalled for this turn (SSE final event). */
+  recalledTitles?: string[];
   audio?: {
     durationMs: number;
     peaks: number[];

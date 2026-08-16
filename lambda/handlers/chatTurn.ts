@@ -160,7 +160,11 @@ export async function handleChatTurn(
         .map((line) => "data: " + JSON.stringify({ t: line }) + "\n\n")
         .join("") +
       "data: " +
-      JSON.stringify({ t: "", injectedMemoryIds: memories.map((m) => m.id) }) +
+      JSON.stringify({
+        t: "",
+        injectedMemoryIds: memories.map((m) => m.id),
+        recalledTitles,
+      }) +
       "\n\ndata: [DONE]\n\n";
 
     return {
