@@ -156,7 +156,10 @@ resource "aws_iam_role_policy" "github_actions" {
           "lambda:TagResource",
           "lambda:UntagResource"
         ]
-        Resource = ["arn:aws:lambda:${var.aws_region}:${var.aws_account_id}:function:${var.function_name}"]
+        Resource = [
+          "arn:aws:lambda:${var.aws_region}:${var.aws_account_id}:function:${var.function_name}",
+          "arn:aws:lambda:${var.aws_region}:${var.aws_account_id}:function:${var.function_name}:*"
+        ]
       },
       {
         Sid    = "LambdaLogGroup"
