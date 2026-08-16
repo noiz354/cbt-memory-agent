@@ -2,6 +2,14 @@
 
 > Pipeline v2 migrasi: On-device media → Cloud LLM hanya intisari teks
 
+## Live (ap-southeast-3 · akun 926375049642)
+
+- **Frontend:** https://d2sbinyjz34sz4.cloudfront.net (CloudFront dist `EWWRSYJJMZAO9`, SPA S3+OAC)
+- **Backend API:** https://4nmncatsvaol2rvmptexmxeoea0myqrr.lambda-url.ap-southeast-3.on.aws (Lambda Function URL, base `/api/v1`)
+- **Health:** `GET /api/v1/health` → `{"status":"ok","crdb":"connected","llm":"available","s3":"available"}` (via CF & direct, 200)
+- **Dashboard:** https://console.aws.amazon.com/cloudwatch/home#dashboards/dashboard:CBTMemoryAgent
+- **CI/CD:** GitHub Actions `Deploy Backend + Frontend` — pipeline **hijau penuh** (auto-deploy via OIDC `cbt-github-actions-deploy`, tanpa static AWS keys)
+
 ---
 
 ## Phase 0 — Foundation (P0) — Safety + Correctness
