@@ -278,8 +278,10 @@ export const apiClient = {
       throw new Error(`API ${res.status}: ${res.statusText}`);
     }
 
-    // Streaming response
-    if (onChunk && res.body) {
+    // Streaming response — backend /chat/turn always speaks SSE, even when the
+    // caller does not pass onChunk (fire-and-forget sync). Guard onChunk so the
+    // same path serves both; never res.json() the SSE body.
+    if (res.body) {
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let fullContent = "";
@@ -295,7 +297,7 @@ export const apiClient = {
           for (const line of lines) {
             const trimmed = line.trim();
             if (trimmed === "data: [DONE]") {
-              onChunk("", true);
+              onChunk?.("", true);
               return { v: 1, turnId: "", assistantMessage: fullContent, tokensUsed: 0, latencyMs: 0 };
             }
             if (!trimmed.startsWith("data: ")) continue;
@@ -304,7 +306,7 @@ export const apiClient = {
               const json = JSON.parse(trimmed.slice(6));
               const delta = json.t ?? "";
               if (Array.isArray(json.injectedMemoryIds)) {
-                onChunk("", true);
+                onChunk?.("", true);
                 return {
                   v: 1,
                   turnId: "",
@@ -319,7 +321,7 @@ export const apiClient = {
               }
               if (delta) {
                 fullContent += delta;
-                onChunk(delta, false);
+                onChunk?.(delta, false);
               }
             } catch {
               // Skip malformed SSE lines
@@ -330,11 +332,11 @@ export const apiClient = {
         reader.releaseLock();
       }
 
-      onChunk("", true);
+      onChunk?.("", true);
       return { v: 1, turnId: "", assistantMessage: fullContent, tokensUsed: 0, latencyMs: 0 };
     }
 
-    // Non-streaming response
+    // No response body (unexpected) — fall back to JSON parse
     return res.json() as Promise<ChatTurnResponse>;
   },
 
