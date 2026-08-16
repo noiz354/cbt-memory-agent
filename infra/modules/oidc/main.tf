@@ -82,6 +82,7 @@ resource "aws_iam_role_policy" "github_actions" {
           "s3:GetBucketObjectLockConfiguration",
           "s3:GetBucketAccelerateConfiguration",
           "s3:GetBucketReplication",
+          "s3:GetReplicationConfiguration",
           "s3:GetBucketLifecycleConfiguration",
           "s3:GetLifecycleConfiguration",
           "s3:GetBucketIntelligentTieringConfiguration",
@@ -170,6 +171,14 @@ resource "aws_iam_role_policy" "github_actions" {
         Resource = ["arn:aws:logs:${var.aws_region}:${var.aws_account_id}:log-group:/aws/lambda/${var.function_name}:*"]
       },
       {
+        Sid    = "LogsDescribe"
+        Effect = "Allow"
+        Action = [
+          "logs:DescribeLogGroups"
+        ]
+        Resource = ["*"]
+      },
+      {
         Sid    = "S3Buckets"
         Effect = "Allow"
         Action = [
@@ -193,6 +202,7 @@ resource "aws_iam_role_policy" "github_actions" {
           "s3:GetBucketObjectLockConfiguration",
           "s3:GetBucketAccelerateConfiguration",
           "s3:GetBucketReplication",
+          "s3:GetReplicationConfiguration",
           "s3:GetBucketLifecycleConfiguration",
           "s3:GetBucketIntelligentTieringConfiguration",
           "s3:GetBucketInventoryConfiguration",
@@ -200,6 +210,7 @@ resource "aws_iam_role_policy" "github_actions" {
           "s3:GetBucketAnalyticsConfiguration",
           "s3:ListBucketVersions",
           "s3:PutBucketVersioning",
+          "s3:GetBucketVersioning",
           "s3:PutBucketEncryption",
           "s3:GetBucketEncryption",
           "s3:GetObjectTagging",
