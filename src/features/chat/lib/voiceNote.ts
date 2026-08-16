@@ -32,7 +32,7 @@ export interface VoiceNoteResult {
 
 const transcribeWorker =
   typeof Worker !== "undefined"
-    ? new Worker(new URL("@/workers/transcribe.worker", import.meta.url), { type: "module" })
+    ? new Worker(new URL("@/workers/transcribe.worker.ts", import.meta.url), { type: "module" })
     : null;
 
 function detectLanguage(): string {

@@ -20,7 +20,7 @@ let prosodyWorker: Worker | null = null;
 function getProsodyWorker(): Worker | null {
   if (typeof Worker === "undefined") return null;
   if (!prosodyWorker) {
-    prosodyWorker = new Worker(new URL("@/workers/prosody.worker", import.meta.url), { type: "module" });
+    prosodyWorker = new Worker(new URL("@/workers/prosody.worker.ts", import.meta.url), { type: "module" });
   }
   return prosodyWorker;
 }
