@@ -1,11 +1,14 @@
 import { useChatStore } from "@/features/chat/store/chatStore";
-import { startFaceWorker, stopFaceWorker } from "@/workers/faceClient";
+import { analyzeImageSnapshot } from "@/features/chat/lib/attachmentAnalysis";
+import { indexAttachment } from "@/features/chat/lib/attachmentIndex";
+import { startFaceWorker, stopFaceWorker, analyzeFrame } from "@/workers/faceClient";
 import { cn } from "@/shared/lib/cn";
 import { useAppStore } from "@/shared/store/appStore";
+import { toast } from "@/shared/store/toastStore";
 import { useDraggable } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
-import { Camera, CameraOff, ScanFace } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { Camera, CameraOff, ScanFace, LoaderCircle, Check } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
 export function CameraPip() {
   const cameraOpen = useChatStore((s) => s.cameraOpen);
@@ -15,6 +18,8 @@ export function CameraPip() {
   const attachSnapshot = useChatStore((s) => s.attachSnapshot);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [savedId, setSavedId] = useState<string | null>(null);
 
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: "camera-pip",
@@ -81,6 +86,46 @@ export function CameraPip() {
     attachSnapshot(canvas.toDataURL("image/jpeg", 0.8));
   };
 
+  const analyzeAndSave = async () => {
+    const video = videoRef.current;
+    if (!video || analyzing) return;
+    setAnalyzing(true);
+    setSavedId(null);
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = video.videoWidth || 320;
+      canvas.height = video.videoHeight || 240;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("Canvas 2D unavailable.");
+      ctx.drawImage(video, 0, 0);
+
+      const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const signal = await analyzeFrame(frame);
+      const { emotions, narrative } = analyzeImageSnapshot(signal);
+      const blob: Blob = await new Promise((resolve, reject) =>
+        canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Snapshot encode failed."))), "image/jpeg", 0.8),
+      );
+      const title = `Camera · ${emotions.primary} ${Math.round(emotions.confidence * 100)}% · ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+      const { nodeId } = await indexAttachment({
+        kind: "image",
+        blob,
+        mimeType: "image/jpeg",
+        ext: "jpg",
+        analysis: { emotions, captured_at: new Date().toISOString() },
+        embeddedNarrative: narrative,
+        title,
+        confidence: emotions.confidence,
+      });
+      setSavedId(nodeId);
+      toast("Snapshot indexed", `Emotion: ${emotions.primary} (${Math.round(emotions.confidence * 100)}%) → memory`, "teal");
+    } catch (err) {
+      console.warn("[CameraPip] analyze-and-save failed:", err);
+      toast("Index failed", err instanceof Error ? err.message : String(err), "danger");
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
   const style = transform ? { transform: CSS.Translate.toString(transform) } : undefined;
 
   return (
@@ -129,13 +174,28 @@ export function CameraPip() {
       </div>
 
       {cameraOpen && (
-        <button
-          type="button"
-          onClick={capture}
-          className="mt-2 w-full rounded-xl bg-white/10 py-1.5 text-[11px] font-semibold uppercase tracking-wide hover:bg-white/16"
-        >
-          Snapshot → composer
-        </button>
+        <div className="mt-2 flex flex-col gap-1.5">
+          <button
+            type="button"
+            onClick={capture}
+            className="w-full rounded-xl bg-white/10 py-1.5 text-[11px] font-semibold uppercase tracking-wide hover:bg-white/16"
+          >
+            Snapshot → composer
+          </button>
+          <button
+            type="button"
+            onClick={analyzeAndSave}
+            disabled={analyzing}
+            className="inline-flex w-full items-center justify-center gap-1.5 rounded-xl bg-teal-soft/15 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-teal-soft hover:bg-teal-soft/25 disabled:opacity-60"
+          >
+            {analyzing ? (
+              <LoaderCircle className="size-3 animate-spin" />
+            ) : savedId ? (
+              <Check className="size-3" />
+            ) : null}
+            {analyzing ? "Analyzing…" : savedId ? "Indexed" : "Analyze & save"}
+          </button>
+        </div>
       )}
     </div>
   );

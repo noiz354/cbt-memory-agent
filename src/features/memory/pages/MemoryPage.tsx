@@ -17,6 +17,7 @@ export function MemoryPage() {
   const hydrateError = useMemoryStore((s) => s.hydrateError);
   const cores = nodes.filter((n) => n.kind === "core").length;
   const chunks = nodes.filter((n) => n.kind === "transcript").length;
+  const attachments = nodes.filter((n) => n.kind === "attachment").length;
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SemanticSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
@@ -87,7 +88,7 @@ export function MemoryPage() {
             />
           </div>
           <p className="text-xs text-ink-mute">
-            {cores} core · {chunks} transcript · on-device
+            {cores} core · {chunks} transcript · {attachments} attachment · on-device
           </p>
         </div>
       </header>

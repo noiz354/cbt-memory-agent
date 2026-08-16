@@ -7,6 +7,7 @@ import { ArrowUp, Paperclip, X } from "lucide-react";
 import { useEffect } from "react";
 import { AutoExpandTextarea } from "./AutoExpandTextarea";
 import { HoldToTalkOrb } from "./HoldToTalkOrb";
+import { VideoRecorderPip } from "./VideoRecorderPip";
 
 const DRAFT_KEY = "cbt-composer-draft";
 
@@ -95,16 +96,25 @@ export function Composer() {
           <Paperclip className="size-4" />
           <input
             type="file"
-            accept=".pdf,.txt,application/pdf,text/plain"
+            accept=".pdf,.txt,application/pdf,text/plain,image/*,video/*,audio/*"
             aria-label="Attach files"
             className="sr-only"
             multiple
             onChange={(e) => {
               const files = [...(e.target.files ?? [])].map((file) => ({
                 id: `${file.name}_${file.size}`,
-                kind: (file.name.endsWith(".pdf") ? "pdf" : "txt") as "pdf" | "txt",
+                kind: (file.name.endsWith(".pdf")
+                  ? "pdf"
+                  : file.type.startsWith("image/")
+                    ? "image"
+                    : file.type.startsWith("video/")
+                      ? "video"
+                      : file.type.startsWith("audio/")
+                        ? "audio"
+                        : "txt") as "pdf" | "txt" | "image" | "video" | "audio",
                 name: file.name,
                 sizeLabel: `${Math.max(1, Math.round(file.size / 1024))} KB`,
+                previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined,
               }));
               if (files.length) attachFiles(files);
               e.target.value = "";
@@ -131,6 +141,7 @@ export function Composer() {
         </div>
 
         <HoldToTalkOrb />
+        <VideoRecorderPip />
 
         <button
           type="button"

@@ -1,5 +1,6 @@
 import { useChatStore } from "@/features/chat/store/chatStore";
 import { cancelVoiceNote, startVoiceNote, stopVoiceNote } from "@/features/chat/lib/voiceNote";
+import { indexVoiceNote } from "@/features/chat/lib/voiceAttachment";
 import { toast } from "@/shared/store/toastStore";
 import { motion } from "framer-motion";
 import { Mic } from "lucide-react";
@@ -52,6 +53,21 @@ export function HoldToTalkOrb() {
       peaks: Array.from({ length: 32 }, () => 0.3 + Math.random() * 0.5),
       src: note.blobUrl ?? "",
     });
+
+    // Best-effort index into memory (prosody → fused emotion → narrative).
+    if (note.ok && note.text && note.blobUrl) {
+      void indexVoiceNote({
+        blobUrl: note.blobUrl,
+        mimeType: note.mimeType ?? "audio/webm",
+        transcript: note.text,
+        durationMs: note.durationMs ?? 0,
+      })
+        .then(() => toast("Voice note indexed", "Emotion analysis → memory", "teal"))
+        .catch((err) => {
+          console.warn("[HoldToTalkOrb] voice-note index failed:", err);
+          toast("Index failed", err instanceof Error ? err.message : String(err), "danger");
+        });
+    }
   };
 
   return (

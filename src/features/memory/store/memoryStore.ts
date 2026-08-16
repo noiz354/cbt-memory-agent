@@ -19,7 +19,7 @@ interface MemoryState {
   select: (id: string | null) => void;
   hydrate: () => Promise<void>;
   moveNode: (id: string, x: number, y: number) => void;
-  addNode: (input: { title: string; excerpt?: string; kind?: "core" | "transcript"; x?: number; y?: number }) => string | null;
+  addNode: (input: { title: string; excerpt?: string; kind?: "core" | "transcript" | "attachment"; x?: number; y?: number }) => string | null;
   linkNodes: (source: string, target: string, label?: string) => boolean;
   unlink: (edgeId: string) => void;
   startPurge: (id: string) => void;

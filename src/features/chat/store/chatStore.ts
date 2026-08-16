@@ -60,7 +60,7 @@ const seedMessages: ChatMessage[] = [
     role: "assistant",
     createdAt: "2026-08-13T08:02:00.000Z",
     content:
-      "Welcome back. This session stays **on-device** — nothing raw leaves the browser.\n\nWhat would you like to work with today? You can type, hold-to-talk, or drag a **Core Memory** into the stream to inject context.",
+      "Welcome back. This session stays **on-device** — raw media never leaves the browser; only the clinical summary syncs to your private vault.\n\nWhat would you like to work with today? You can type, hold-to-talk, or drag a **Core Memory** into the stream to inject context.",
   },
   {
     id: "msg_2",

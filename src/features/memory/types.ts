@@ -1,4 +1,4 @@
-export type MemoryKind = "core" | "transcript";
+export type MemoryKind = "core" | "transcript" | "attachment";
 
 export interface GraphNode {
   id: string;

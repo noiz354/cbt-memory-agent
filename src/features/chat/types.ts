@@ -1,6 +1,6 @@
 export type ChatRole = "user" | "assistant" | "system" | "context";
 
-export type AttachmentKind = "pdf" | "txt" | "image" | "audio";
+export type AttachmentKind = "pdf" | "txt" | "image" | "audio" | "video";
 
 export interface ChatAttachment {
   id: string;

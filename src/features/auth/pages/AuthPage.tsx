@@ -22,7 +22,7 @@ export function AuthPage() {
     <AuthShell
       eyebrow="Secure entry"
       title="Sign in privately"
-      lede="Passkeys or a one-time magic link. No password is stored, and the session key never leaves this device."
+      lede="Passkeys or a one-time magic link. No password is stored, and the session key never leaves this device. Media is analyzed on-device — only the clinical summary (plus your explicit snapshot uploads) syncs to your private memory vault."
     >
       <div className="space-y-3">
         <label className="block text-xs font-semibold uppercase tracking-wide text-ink-mute">

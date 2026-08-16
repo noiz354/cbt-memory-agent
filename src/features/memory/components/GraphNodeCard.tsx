@@ -2,7 +2,7 @@ import type { GraphNode } from "@/features/memory/types";
 import { nodeSize } from "@/features/memory/types";
 import { cn } from "@/shared/lib/cn";
 import { motion } from "framer-motion";
-import { FileText, Sparkles } from "lucide-react";
+import { FileText, Image, Sparkles } from "lucide-react";
 
 interface GraphNodeCardProps {
   node: GraphNode;
@@ -23,7 +23,8 @@ export function GraphNodeCard({
 }: GraphNodeCardProps) {
   const { w, h } = nodeSize(node.weight);
   const decaying = node.weight < 0.45;
-  const CoreIcon = node.kind === "core" ? Sparkles : FileText;
+  const CoreIcon = node.kind === "core" ? Sparkles : node.kind === "attachment" ? Image : FileText;
+  const kindLabel = node.kind === "core" ? "Core" : node.kind === "attachment" ? "Attachment" : "Chunk";
 
   return (
     <motion.button
@@ -59,7 +60,7 @@ export function GraphNodeCard({
           )}
         >
           <CoreIcon className="size-3" />
-          {node.kind === "core" ? "Core" : "Chunk"}
+          {kindLabel}
         </span>
         <span className="text-[10px] font-semibold text-ink-mute">{Math.round(node.weight * 100)}%</span>
       </div>

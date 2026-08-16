@@ -38,7 +38,7 @@ export function NodeInspector() {
           <header className="flex items-start justify-between gap-2 px-4 pt-4">
             <div>
               <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-teal">
-                {node.kind === "core" ? "Core memory" : "Transcript chunk"}
+                {node.kind === "core" ? "Core memory" : node.kind === "attachment" ? "Media attachment" : "Transcript chunk"}
               </p>
               <h2 className="mt-1 font-display text-base font-bold leading-snug">{node.title}</h2>
             </div>

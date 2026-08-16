@@ -24,6 +24,7 @@ export interface VoiceNoteResult {
   text?: string;
   blobUrl?: string;
   durationMs?: number;
+  mimeType?: string;
   /** "whisper" (on-device) | "web-speech" (fallback) */
   via?: "whisper" | "web-speech";
   error?: string;
@@ -95,7 +96,8 @@ export function stopVoiceNote(): Promise<VoiceNoteResult> {
     useChatStore.getState().setProsody(0);
     const stopAndBlob = () => {
       r.stream.getTracks().forEach((t) => t.stop());
-      const blob = new Blob(r.chunks, { type: r.mediaRecorder.mimeType || "audio/webm" });
+      const mimeType = r.mediaRecorder.mimeType || "audio/webm";
+      const blob = new Blob(r.chunks, { type: mimeType });
       const blobUrl = URL.createObjectURL(blob);
       r.blobUrl = blobUrl;
       recorder = null;
@@ -103,7 +105,7 @@ export function stopVoiceNote(): Promise<VoiceNoteResult> {
       const liveFallbackText = liveRecognition?.getTranscript();
       liveRecognition?.stop();
       liveRecognition = null;
-      void transcribeVoiceNote(blobUrl, liveFallbackText).then(resolve);
+      void transcribeVoiceNote(blobUrl, mimeType, liveFallbackText).then(resolve);
     };
 
     if (r.mediaRecorder.state === "inactive") {
@@ -148,6 +150,7 @@ function measureBlobDuration(blobUrl: string): Promise<number> {
 
 async function transcribeVoiceNote(
   blobUrl: string,
+  mimeType: string,
   liveFallbackText?: string,
 ): Promise<VoiceNoteResult> {
   if (!transcribeWorker) {
@@ -165,6 +168,7 @@ async function transcribeVoiceNote(
           text: event.data.text,
           blobUrl,
           durationMs,
+          mimeType,
           via: "whisper",
         });
       } else {

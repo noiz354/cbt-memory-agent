@@ -7,7 +7,7 @@ import { isSpeaking, toggleSpeak } from "@/shared/lib/speech";
 import { useDraggable } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
 import { motion } from "framer-motion";
-import { FileText, GripVertical, ImageIcon, Quote, Sparkles, Volume2 } from "lucide-react";
+import { FileText, GripVertical, ImageIcon, Mic, Quote, Sparkles, Video, Volume2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { WaveformScrubber } from "./WaveformScrubber";
 
@@ -123,6 +123,10 @@ export function ChatBubble({ message }: ChatBubbleProps) {
               />
             ) : file.kind === "image" ? (
               <ImageIcon className="size-4" />
+            ) : file.kind === "video" ? (
+              <Video className="size-4 text-teal" />
+            ) : file.kind === "audio" ? (
+              <Mic className="size-4 text-teal" />
             ) : (
               <FileText className="size-4 text-teal" />
             )}
