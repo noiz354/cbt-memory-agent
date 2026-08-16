@@ -57,8 +57,8 @@ describe("vector writer — handleUpsertMemory", () => {
     expect(llm.generateEmbedding).toHaveBeenCalledTimes(1);
     expect(llm.generateEmbedding).toHaveBeenCalledWith("Panic attack trigger — loud noise at noon");
 
-    const deletes = crdb.executes.filter((c) => c.sql.includes("DELETE FROM embeddings"));
-    const inserts = crdb.executes.filter((c) => c.sql.includes("INSERT INTO embeddings"));
+    const deletes = crdb.executes.filter((c: ExecuteCall) => c.sql.includes("DELETE FROM embeddings"));
+    const inserts = crdb.executes.filter((c: ExecuteCall) => c.sql.includes("INSERT INTO embeddings"));
     expect(deletes).toHaveLength(1);
     expect(inserts).toHaveLength(1);
     expect(inserts[0].sql).toContain("embedding");
@@ -80,8 +80,8 @@ describe("vector writer — handleUpsertMemory", () => {
     expect(res.statusCode).toBe(200);
     expect(JSON.parse(res.body).ok).toBe(true);
     // Node masih tersimpan, tapi tidak ada INSERT embeddings.
-    expect(crdb.executes.some((c) => c.sql.includes("INSERT INTO memory_nodes"))).toBe(true);
-    expect(crdb.executes.some((c) => c.sql.includes("INSERT INTO embeddings"))).toBe(false);
+    expect(crdb.executes.some((c: ExecuteCall) => c.sql.includes("INSERT INTO memory_nodes"))).toBe(true);
+    expect(crdb.executes.some((c: ExecuteCall) => c.sql.includes("INSERT INTO embeddings"))).toBe(false);
   });
 
   it("upsert edge does NOT generate embeddings", async () => {
@@ -96,8 +96,8 @@ describe("vector writer — handleUpsertMemory", () => {
     );
     expect(res.statusCode).toBe(200);
     expect(llm.generateEmbedding).not.toHaveBeenCalled();
-    expect(crdb.executes.some((c) => c.sql.includes("INSERT INTO memory_edges"))).toBe(true);
-    expect(crdb.executes.some((c) => c.sql.includes("embeddings"))).toBe(false);
+    expect(crdb.executes.some((c: ExecuteCall) => c.sql.includes("INSERT INTO memory_edges"))).toBe(true);
+    expect(crdb.executes.some((c: ExecuteCall) => c.sql.includes("embeddings"))).toBe(false);
   });
 
   it("rejects malformed body (400)", async () => {
@@ -132,11 +132,11 @@ describe("vector writer — handleUpsertMemory", () => {
       "tok-1",
       "dev-1",
     );
-    const inserts = crdb.executes.filter((c) => c.sql.includes("INSERT INTO embeddings"));
+    const inserts = crdb.executes.filter((c: ExecuteCall) => c.sql.includes("INSERT INTO embeddings"));
     expect(inserts.length).toBeGreaterThanOrEqual(3);
     expect(inserts[0].params?.[3]).toBe("chunk-0");
     expect(inserts[1].params?.[3]).toBe("chunk-1");
-    const deletes = crdb.executes.filter((c) => c.sql.includes("DELETE FROM embeddings"));
+    const deletes = crdb.executes.filter((c: ExecuteCall) => c.sql.includes("DELETE FROM embeddings"));
     expect(deletes).toHaveLength(1);
   });
 });

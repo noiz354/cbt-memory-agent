@@ -212,7 +212,7 @@ describe("reflectUser", () => {
 
     expect(res.factsUpserted).toBe(1);
 
-    const insert = crdb.queries.find((q) => q.sql.includes("INSERT INTO memory_nodes"));
+    const insert = crdb.queries.find((q: { sql: string; params?: unknown[] }) => q.sql.includes("INSERT INTO memory_nodes"));
     const insertSql = insert?.sql ?? "";
     expect(insertSql).toContain("ON CONFLICT (id) DO UPDATE");
     expect(insertSql).toContain("verified    = true");
@@ -223,7 +223,7 @@ describe("reflectUser", () => {
     expect(llm.generateEmbedding).toHaveBeenCalled();
 
     // audit REFLECTION_RAN (type via param $1)
-    const audit = crdb.queries.find((q) => q.sql.includes("INSERT INTO audit_events"));
+    const audit = crdb.queries.find((q: { sql: string; params?: unknown[] }) => q.sql.includes("INSERT INTO audit_events"));
     expect(audit?.params?.[0]).toBe(REFLECT_AUDIT_TYPE);
   });
 
