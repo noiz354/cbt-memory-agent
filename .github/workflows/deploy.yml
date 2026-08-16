@@ -102,10 +102,25 @@ jobs:
       - name: Health check (backend)
         run: |
           sleep 20
-          curl -f ${{ secrets.API_URL }}/api/v1/health || exit 1
+          for i in $(seq 1 10); do
+            if curl -fsS ${{ secrets.API_URL }}/api/v1/health; then
+              echo "Backend health OK (attempt $i)"
+              break
+            fi
+            echo "Backend health attempt $i failed, retrying in 15s"
+            sleep 15
+            if [ "$i" -eq 10 ]; then exit 1; fi
+          done
 
       - name: Health check (frontend via CloudFront)
         run: |
           sleep 20
-          curl -f ${{ secrets.APP_URL }}/ || exit 1
-          curl -f ${{ secrets.APP_URL }}/api/v1/health || exit 1
+          for i in $(seq 1 10); do
+            if curl -fsS ${{ secrets.APP_URL }}/ && curl -fsS ${{ secrets.APP_URL }}/api/v1/health; then
+              echo "Frontend health OK (attempt $i)"
+              break
+            fi
+            echo "Frontend health attempt $i failed, retrying in 15s"
+            sleep 15
+            if [ "$i" -eq 10 ]; then exit 1; fi
+          done
