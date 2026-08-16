@@ -146,6 +146,8 @@ describe("HTTP trace contract (static)", () => {
       "/api/v1/sessions",
       "/api/v1/export",
       "/api/v1/purge",
+      "/api/v1/attachments",
+      "/api/v1/attachments/presign",
       "/api/v1/metrics",
       "/api/v1/events",
       "/api/v1/monetization/cac",

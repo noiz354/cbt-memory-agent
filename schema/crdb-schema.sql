@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS auth_tokens (
 CREATE TABLE IF NOT EXISTS memory_nodes (
   id STRING PRIMARY KEY,
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  kind STRING NOT NULL CHECK (kind IN ('core', 'transcript')),
+  kind STRING NOT NULL CHECK (kind IN ('core', 'transcript', 'attachment')),
   title STRING NOT NULL,
   excerpt STRING,
   tags STRING[],
@@ -128,6 +128,36 @@ CREATE TABLE IF NOT EXISTS embeddings (
 -- equality-constraint `e.user_id = $n::uuid` (index pruning aktif).
 CREATE VECTOR INDEX IF NOT EXISTS embeddings_vector_idx
   ON embeddings (user_id, embedding vector_cosine_ops);
+
+-- ─────────────────────────────────────────────
+-- Attachments (emotional media analysis)
+-- ─────────────────────────────────────────────
+-- Hasil analisis emosi on-device untuk media terindeks (gambar/video/audio).
+-- Raw media byte TIDAK disimpan di sini — hanya s3_key (bucket S3 exports).
+-- memory_node_id → memory_nodes ON DELETE CASCADE: hard purge / delete memory
+-- otomatis membersihkan baris (pola sama dengan embeddings).
+
+CREATE TABLE IF NOT EXISTS attachments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  memory_node_id STRING NOT NULL REFERENCES memory_nodes(id) ON DELETE CASCADE,
+  kind STRING NOT NULL CHECK (kind IN ('image', 'video', 'audio')),
+  duration_ms INT,
+  frame_count INT,
+  analysis JSONB NOT NULL,
+  embedded_narrative STRING NOT NULL,
+  s3_key STRING NOT NULL,
+  mime_type STRING,
+  size_bytes INT,
+  session_id STRING,
+  turn_id STRING,
+  extracted_on_device BOOL DEFAULT true,
+  pipeline_version STRING,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  INDEX attachments_user_idx (user_id),
+  INDEX attachments_node_idx (memory_node_id),
+  INDEX attachments_kind_idx (kind)
+);
 
 -- ─────────────────────────────────────────────
 -- Sessions (CBT therapy sessions)

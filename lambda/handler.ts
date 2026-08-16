@@ -39,6 +39,12 @@ import { handleSaveSession, handleListSessions } from "./handlers/session";
 import { handleListSessionTurns } from "./handlers/turns";
 import { handleExport } from "./handlers/export";
 import { handlePurge } from "./handlers/purge";
+import {
+  handlePresignAttachment,
+  handleCreateAttachment,
+  handleListAttachments,
+  handleDeleteAttachment,
+} from "./handlers/attachments";
 import { handleMetrics, handleHealth } from "./handlers/health";
 import { handleTelemetryRelay } from "./handlers/telemetry";
 import { handleRequestMagicLink, handleConsumeMagicLink } from "./handlers/auth";
@@ -247,7 +253,22 @@ async function route(
 
   // Purge
   if (method === "POST" && path === "/api/v1/purge") {
-    return await handlePurge(event, crdb, token, deviceId);
+    return await handlePurge(event, crdb, s3, token, deviceId);
+  }
+
+  // Attachments (emotional media)
+  if (method === "POST" && path === "/api/v1/attachments/presign") {
+    return await handlePresignAttachment(event, crdb, s3, token, deviceId);
+  }
+  if (method === "POST" && path === "/api/v1/attachments") {
+    return await handleCreateAttachment(event, crdb, llm, s3, token, deviceId);
+  }
+  if (method === "GET" && path === "/api/v1/attachments") {
+    return await handleListAttachments(crdb, token, deviceId);
+  }
+  if (method === "DELETE" && path.startsWith("/api/v1/attachments/")) {
+    const id = path.split("/").pop()!;
+    return await handleDeleteAttachment(id, crdb, s3, token, deviceId);
   }
 
   // Metrics
