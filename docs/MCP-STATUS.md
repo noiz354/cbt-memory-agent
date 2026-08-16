@@ -130,6 +130,7 @@ lalu menyisipkan blok `CockroachDB Agent Skills Context` ke user prompt sebelum 
 | AWS Service #1: Lambda | ✅ Done | Deployed (ap-southeast-3) |
 | LLM + Embeddings: OpenRouter | ✅ Done | `lambda/lib/openrouter.ts` |
 | AWS Service #2: S3 | ✅ Done | Export bucket |
+| Manual verification (human tester) | ✅ Handoff | `docs/MANUAL-RUNBOOK.md` (12-item checklist) |
 | Public Repo + MIT License | ✅ Done | Repo ini |
 | README + Setup Instructions | ⏳ Pending | Update di Workstream E |
 
