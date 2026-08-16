@@ -3,12 +3,14 @@ import { Providers } from "@/app/providers";
 import { applyTheme, useThemeStore } from "@/shared/store/themeStore";
 import "@/shared/styles/index.css";
 import { initTelemetry } from "@/shared/lib/telemetry";
+import { initWebVitals } from "@/shared/lib/webVitals";
 import { setUnauthorizedHandler } from "@/shared/lib/apiClient";
 import { useAuthStore } from "@/features/auth/store/authStore";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 initTelemetry();
+initWebVitals();
 applyTheme(useThemeStore.getState().mode);
 
 // Any 401 from the backend means the session token is no longer accepted
