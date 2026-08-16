@@ -18,7 +18,13 @@ export class S3ClientService {
 
   constructor(bucket: string) {
     this.bucket = bucket;
-    this.client = new S3Client({ region: process.env.AWS_REGION ?? "ap-southeast-3" });
+    // requestChecksumCalculation WHEN_REQUIRED: presigned media PUT dipakai client
+    // browser/curl yang tidak menghitung CRC32 — tanpa ini SDK v3.800 menempelkan
+    // x-amz-checksum-crc32 placeholder yang membuat SignatureDoesNotMatch.
+    this.client = new S3Client({
+      region: process.env.AWS_REGION ?? "ap-southeast-3",
+      requestChecksumCalculation: "WHEN_REQUIRED",
+    });
   }
 
   /**
@@ -53,8 +59,10 @@ export class S3ClientService {
       const command = new PutObjectCommand({
         Bucket: this.bucket,
         Key: key,
+        // Tanpa ServerSideEncryption: bucket punya default AES256 at rest, jadi
+        // x-amz-server-side-encryption TIDAK masuk SignedHeaders — klien cukup
+        // PUT polos (fetch/curl), tanpa harus mengirim header SSE.
         ContentType: mimeType,
-        ServerSideEncryption: "AES256",
       });
       return await getSignedUrl(this.client, command, { expiresIn: 900 });
     });
