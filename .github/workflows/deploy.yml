@@ -65,12 +65,6 @@ jobs:
       - name: Build Lambda zip
         run: bash scripts/build-lambda.sh
 
-      - name: Debug OIDC claims
-        run: |
-          TOKEN=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com")
-          PAYLOAD=$(printf '%s' "$TOKEN" | jq -r '.value' | cut -d. -f2)
-          printf '%s' "$PAYLOAD" | tr '_-' '/+' | base64 -d 2>/dev/null | jq '{iss, aud, sub, repo, sha}' || true
-
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:

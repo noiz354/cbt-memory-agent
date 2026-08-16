@@ -4,6 +4,10 @@
 # `refs/heads/main` (StringLike), sehingga role hanya bisa diasumsikan dari
 # workflow repo tersebut, bukan dari repo/ref lain.
 #
+# Catatan: klaim `sub` GitHub kini menyertakan ID numerik owner/repo
+# (contoh: `repo:noiz354@837457/cbt-memory-agent@1336016823:ref:refs/heads/main`),
+# jadi pola wajib memakai wildcard `*` di sekitar owner/repo (StringLike).
+#
 # Catatan: provider OIDC + role dibuat oleh plan ini sendiri. Apply pertama
 # harus dijalankan dengan kredensial lokal (sudah AdministratorAccess);
 # setelah itu CI bisa menjalankan terraform apply dengan role ini.
@@ -31,7 +35,7 @@ resource "aws_iam_role" "github_actions" {
             "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
           }
           StringLike = {
-            "token.actions.githubusercontent.com:sub" = "repo:${var.github_owner}/${var.github_repo}:ref:refs/heads/main"
+            "token.actions.githubusercontent.com:sub" = "repo:${var.github_owner}*/${var.github_repo}*:ref:refs/heads/main"
           }
         }
       }
