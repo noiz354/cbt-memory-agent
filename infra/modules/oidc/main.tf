@@ -60,6 +60,7 @@ resource "aws_iam_role_policy" "github_actions" {
         Effect = "Allow"
         Action = [
           "s3:GetObject",
+          "s3:GetObjectVersion",
           "s3:PutObject",
           "s3:DeleteObject",
           "s3:ListBucket",
@@ -67,10 +68,26 @@ resource "aws_iam_role_policy" "github_actions" {
           "s3:GetBucketVersioning",
           "s3:GetBucketLocation",
           "s3:GetBucketPolicy",
+          "s3:GetBucketPolicyStatus",
           "s3:GetBucketAcl",
+          "s3:GetBucketCors",
+          "s3:GetBucketWebsite",
+          "s3:GetBucketLogging",
+          "s3:GetBucketNotification",
+          "s3:GetBucketRequestPayment",
           "s3:GetBucketTagging",
+          "s3:GetBucketOwnershipControls",
+          "s3:GetBucketPublicAccessBlock",
+          "s3:GetBucketEncryption",
+          "s3:GetBucketObjectLockConfiguration",
+          "s3:GetBucketAccelerateConfiguration",
+          "s3:GetBucketReplication",
+          "s3:GetBucketLifecycleConfiguration",
           "s3:GetLifecycleConfiguration",
-          "s3:GetObjectVersion"
+          "s3:GetBucketIntelligentTieringConfiguration",
+          "s3:GetBucketInventoryConfiguration",
+          "s3:GetBucketMetricsConfiguration",
+          "s3:GetBucketAnalyticsConfiguration"
         ]
         Resource = [
           "arn:aws:s3:::cbt-memory-agent-terraform-state-apse3",
@@ -98,13 +115,21 @@ resource "aws_iam_role_policy" "github_actions" {
           "ssm:PutParameter",
           "ssm:GetParameter",
           "ssm:GetParameters",
-          "ssm:GetParametersByPath",
-          "ssm:DescribeParameters",
+          "ssm:GetParameterHistory",
           "ssm:DeleteParameter",
           "ssm:AddTagsToResource",
           "ssm:ListTagsForResource"
         ]
         Resource = ["arn:aws:ssm:${var.aws_region}:${var.aws_account_id}:parameter/${var.environment}/*"]
+      },
+      {
+        Sid    = "SSMDescribe"
+        Effect = "Allow"
+        Action = [
+          "ssm:DescribeParameters",
+          "ssm:GetParametersByPath"
+        ]
+        Resource = ["*"]
       },
       {
         Sid    = "LambdaFunction"
@@ -156,9 +181,23 @@ resource "aws_iam_role_policy" "github_actions" {
           "s3:PutBucketPolicy",
           "s3:DeleteBucketPolicy",
           "s3:GetBucketAcl",
+          "s3:GetBucketCors",
+          "s3:GetBucketWebsite",
+          "s3:GetBucketLogging",
+          "s3:GetBucketNotification",
+          "s3:GetBucketRequestPayment",
+          "s3:GetBucketPolicyStatus",
           "s3:GetBucketTagging",
           "s3:GetBucketOwnershipControls",
           "s3:GetBucketPublicAccessBlock",
+          "s3:GetBucketObjectLockConfiguration",
+          "s3:GetBucketAccelerateConfiguration",
+          "s3:GetBucketReplication",
+          "s3:GetBucketLifecycleConfiguration",
+          "s3:GetBucketIntelligentTieringConfiguration",
+          "s3:GetBucketInventoryConfiguration",
+          "s3:GetBucketMetricsConfiguration",
+          "s3:GetBucketAnalyticsConfiguration",
           "s3:ListBucketVersions",
           "s3:PutBucketVersioning",
           "s3:PutBucketEncryption",
