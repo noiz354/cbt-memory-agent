@@ -116,7 +116,7 @@
 - [x] `aws lambda invoke` → **200** `{"status":"ok","crdb":"connected","llm":"available","s3":"available","version":"0.1.0"}`
 - [x] **403 Fixed:** Akses publik Function URL 403 (`AccessDeniedException`) — root cause: sejak Okt 2025 AWS butuh **dua** permission di resource-based policy (`lambda:InvokeFunctionUrl` + `lambda:InvokeFunction`) walau AuthType=NONE. Commit `8145e93` menambah statement kedua (`infra/modules/lambda/main.tf:94-104`); recheck pada ap-southeast-3 → **HTTP 200**. 403 murni dari AWS layer (handler tidak pernah return 403). Sisa: `docs/MANUAL-TESTING.md` masih menunjuk URL us-east-1 lama
 - [ ] **TODO:** Setup GitHub remote + secrets untuk `.github/workflows/deploy.yml` (butuh static AWS keys, CRDB creds, dll) — `git remote -v` masih kosong; deploy.yml butuh 9 secrets + tambah `TF_VAR_resend_api_key` (variabel required)
-- [ ] **TODO:** Deploy frontend (docker image + nginx proxy `/api/v1` → backend) — infra masih Lambda-only, belum ada compute frontend
+- [x] **TODO:** Deploy frontend — **S3 + CloudFront** (bukan docker/nginx) sejak 2026-08-16, lihat section `Deploy & CI` di bawah
 
 ## Migrasi Bedrock → OpenRouter (2026-08-14)
 
@@ -146,7 +146,7 @@ Keputusan: **semua resource AWS dipindah ke ap-southeast-3** agar Lambda berada 
 - [x] Update `lambda/lib/s3.ts` (region-aware), scripts, CI deploy.yml, docs
 - [x] `terraform apply` → destroy us-east-1, create ap-southeast-3
 - [x] Verifikasi health/chat/semantic di region baru + recheck 403
-- [ ] Bersihkan resource us-east-1 yang ter-orphan
+- [x] Bersihkan resource us-east-1 yang ter-orphan (2026-08-16: S3 state bucket, DynamoDB lock, Lambda, log group, 6 SSM param — semua dihapus; ap-southeast-3 utuh)
 
 ## Audit Komprehensif (2026-08-15)
 
@@ -172,7 +172,7 @@ Fix dari AUDIT/WEB-QUALITY/SECURITY diimplementasikan; `npm run typecheck` (fron
 - [x] **Empty state hydrate gagal** — `memoryStore`/`sessionStore` set `[]` + `hydrateError` (bukan seed sebagai data asli)
 - [x] **Dokumen audit diperbarui** menandai status fix (AUDIT.md, WEB-QUALITY-AUDIT.md, SECURITY-AUDIT.md §7 remediation log)
 - [x] **DONE sejak 2026-08-15 (Phase A/B/C):** real authN/authZ server-side **sebagian** (session_token verification via `validateAuth` async + `SELECT id FROM users WHERE session_token=$1`, `middleware/auth.ts:41-42`; legacy `profile.id` masih fallback), `GET /turns` read endpoint (2.5), integrasi WebLLM on-device (1.1), wiring `startAudioWorker` → Hold-to-talk (1.2), passkey `credentials.create` real (create saja, `get` belum)
-- [ ] **Masih terbuka** (untuk lanjutan): passkey `credentials.get()` assertion ceremony, rewrite copy privasi, `ALLOWED_ORIGIN` ter-set (masih `*`), rate limit + server audit log, CSP handler, route-level code splitting, re-run Lighthouse pada prod build, hapus resource us-east-1 orphan
+- [x] **Masih terbuka (diselesaikan 2026-08-16):** passkey `credentials.get()` (commit `d8737e3`), `ALLOWED_ORIGIN` ter-set ke domain CloudFront, CSP + security headers via CloudFront response headers policy, hapus resource us-east-1 orphan. **Masih terbuka:** rewrite copy privasi, rate limit + server audit log (`audit_events` INSERT), route-level code splitting, re-run Lighthouse pada prod build
 
 ## Phase A + B (2026-08-15) — implementasi WORK-LIST
 
@@ -209,7 +209,7 @@ Magic-link email via Resend — server-backed auth, resolves WORK-LIST 3.2 (real
 - **Config**: `RESEND_API_KEY` + `EMAIL_FROM=onboarding@resend.dev` di `.env` (git-ignored) + placeholder di `.env.example`. **Tidak pernah di-commit**
 - **Cost** (verified): ≤100 email/bulan ≈ $0 (Resend free tier 3k/mo, Lambda free tier). 1 email = 1 invokasi Lambda (~$0) + 1 email Resend
 - **Terraform wiring done** (commit `fe98ab3`): env `RESEND_API_KEY` via SSM `/hackathon/resend/api-key`, `EMAIL_FROM`, `APP_URL` masuk ke Lambda env; `infra/terraform.tfvars` siap
-- **⚠ Deployment live belum diverifikasi**: perlu `aws login --profile aws-x-cdb`, apply schema ke CRDB, `terraform apply`, lalu test magic-link. Sampai saat itu perilaku live = dev-mode preview (`{ok:true, sent:false, devUrl}`). Juga `deploy.yml` belum kirim `TF_VAR_resend_api_key` (variabel `resend_api_key` sekarang required tanpa default → CI `terraform apply` akan gagal sampai secret ditambah)
+- [x] **Deployment live — VERIFIED 2026-08-16** (lihat section `Deploy & CI`): schema `auth_tokens` + `users.session_token` sudah di-apply ke CRDB sejak deploy Phase C; `RESEND_API_KEY` live di Lambda env; `POST /auth/magic-link` → `{ok:true,sent:true}`; `POST /auth/callback` diverifikasi E2E (single-use, replay ditolak). `deploy.yml` sudah kirim semua `TF_VAR_*` termasuk `resend_api_key`
 
 ## Observability: Full-Stack OpenTelemetry → Grafana Cloud (2026-08-15)
 
@@ -359,3 +359,17 @@ Audit integrasi frontend-backend 100 item (`docs/FRONTEND-INTEGRATION-AUDIT.md`,
 - [x] **HIGH6 — 429 handling** (`76328ed`): `RateLimitError` bertipe dengan `retryAfterMs` dari header `Retry-After` (detik atau HTTP-date); chatStore tampilkan copy rate-limit ramah.
 - [x] **Docs** — `docs/FRONTEND-INTEGRATION-AUDIT.md` diperbarui (status tiap gap, coverage 86%, commit per item); `docs/MANUAL-RUNBOOK.md` + checklist UI **U1–U11** untuk human tester (fitur pasca-audit: chip recall, chat hydrate, galeri, analytics, passkey, session expiry, abort, 429, crisis audit, web vitals).
 - [x] **Sisa gap (dokumentasi)** — monetization UI, server audit viewer, hard-purge leak, logout reset state, token refresh, session rename, compare real-turns, "active sessions" real, retention setting, streaming un-buffer, per-call error tracking (daftar lengkap + status di audit doc).
+
+## Deploy & CI — Frontend S3+CloudFront, OIDC GitHub Actions, Phase C Magic-Link Live, Cleanup us-east-1 (2026-08-16)
+
+Penuntasan work package Deploy/CI dari WORK-LIST 3.6 + Phase C deployment + production frontend. **Semua VERIFIED live** (ap-southeast-3, akun 926375049642). Menggunakan workflow `docs/15-8-26/ADDY-OSMANI-SKILLS.md` (Define→Plan→Build→Verify→Review→Ship).
+
+- [x] **Frontend hosting — S3 + CloudFront (bukan docker/nginx)** — `infra/modules/frontend/` (baru): S3 bucket `cbt-memory-agent-frontend` (private, versioning, AES256) + CloudFront OAC (S3 origin) + custom origin ke Lambda Function URL untuk `/api/v1/*` (CachingDisabled `4135ea2d…`, AllViewerExceptHostHeader `b689b0a8…`, https-only) + **response headers policy** replicating nginx (CSP, X-Content-Type-Options nosniff, X-Frame-Options DENY, Referrer-Policy, X-XSS-Protection) + SPA fallback (403/404 → index.html). **Live:** `https://d2sbinyjz34sz4.cloudfront.net` (dist `EWWRSYJJMZAO9`), `/api/v1/health` via CF → 200, security headers diverifikasi via curl, hashed asset `immutable` 1y, `index.html` no-cache.
+- [x] **CORS Lambda terkunci** — `infra/modules/lambda/main.tf`: `allow_origins = [var.allowed_origin]` (bukan `*`); live = `[https://d2sbinyjz34sz4.cloudfront.net]`, preflight OK.
+- [x] **Deploy script** — `scripts/deploy-frontend.sh`: build → `aws s3 sync` (immutable) + `index.html` no-cache → auto-detect dist ID → `create-invalidation "/*"`.
+- [x] **CI → OIDC** — `infra/modules/oidc/` (baru): OIDC provider `token.actions.githubusercontent.com` (thumbprint `6938fd4d…`) + role `cbt-github-actions-deploy` trust `repo:noiz354/cbt-memory-agent:ref:refs/heads/main` dengan **least-privilege inline policy** (state S3, lock DDB, SSM `/hackathon/*`, Lambda+url, logs, S3 exports+frontend, CloudFront, IAM PassRole). `deploy.yml` rewrite: static AWS keys **dihapus** → `configure-aws-credentials@v4` `role-to-assume ${{ secrets.AWS_DEPLOY_ROLE_ARN }}` (id-token: write); TF_VAR lengkap (`resend_api_key`, `email_from`, `app_url`, `grafana_otlp_endpoint`, `grafana_otlp_headers` ditambah); step deploy frontend; health check backend + frontend; paths diperluas (`src/**`, `scripts/**`, `deploy.yml`).
+- [x] **GitHub repo + secrets** — repo **public** `noiz354/cbt-memory-agent` (dibuat via `gh repo create`; history dibersihkan dari blob 1.09GB `reverse-prompt-aws-cockroachdb.md` via `git filter-repo`, di-gitignore, KEPT local). 14 secrets: `AWS_REGION`, `AWS_DEPLOY_ROLE_ARN`, `APP_URL`, `ALLOWED_ORIGIN`, `API_URL`, `EMAIL_FROM`, `CRDB_CONNECTION_URL`, `CRDB_CLUSTER_ID`, `CRDB_CLUSTER_NAME`, `CCLOUD_API_KEY`, `OPENROUTER_API_KEY`, `RESEND_API_KEY`, `GRAFANA_OTLP_ENDPOINT`, `GRAFANA_OTLP_HEADERS` (dari `.env`, tanpa AWS keys).
+- [x] **Phase C magic-link live** — schema `auth_tokens` + `users.session_token` sudah di-apply; `POST /api/v1/auth/magic-link` `{email:noiz354@gmail.com}` → `{ok:true,sent:true}` (Resend free tier hanya kirim ke email owner akun); `POST /auth/callback` E2E verified (token single-use, `used_at` ter-set, replay → "Link is not valid", `users.session_token` + `display_name` ter-update, `GET /sessions` 200). `app_url`/`allowed_origin` di tfvars = domain CloudFront.
+- [x] **Cleanup us-east-1 orphan** — S3 `cbt-memory-agent-terraform-state` (termasuk semua versi), DynamoDB `cbt-memory-agent-terraform-lock`, Lambda `cbt-memory-agent` + log group, 6 SSM `/hackathon/*` — semua dihapus (region-scoped). **ap-southeast-3 utuh** (state bucket, lock ACTIVE, frontend+CF live). Budgets akun dibiarkan.
+- [x] **Verify/Review** — `~/bin/terraform fmt/validate/plan/apply` bersih (0 change ke lambda/budget/eventbridge eksisting); lambda `npm test` 139/139 ✓, `tsc --noEmit` ✓; frontend `npm run typecheck` ✓. Deploy pipeline OIDC divalidasi lewat push + `gh run watch`.
+- [ ] **Sisa** — Video demo ≤3 menit (script `docs/DEMO-SCRIPT.md`), re-run Lighthouse terhadap prod build CF.

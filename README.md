@@ -31,7 +31,8 @@ CockroachDB — bukan hanya localStorage / file-based storage.
 | Service | Status | Penggunaan |
 |---|---|---|
 | **AWS Lambda** | ✅ | Serverless API handler + agentic memory loop (reflection cron) |
-| **Amazon S3** | ✅ | Export bundle storage |
+| **Amazon S3** | ✅ | Frontend hosting (via CloudFront OAC) + export bundle storage |
+| **Amazon CloudFront** | ✅ | CDN frontend (SPA) + proxy `/api/v1` → Lambda, security headers |
 | **Amazon EventBridge** | ✅ | Schedule reflection job (rate 6 jam) → invoke Lambda |
 | **Amazon CloudWatch** | ✅ | Logs + dashboard + Lambda health gate |
 | **OpenRouter** | ✅ | LLM inference (Llama free) + embeddings (bge-m3) |
@@ -41,7 +42,7 @@ CockroachDB — bukan hanya localStorage / file-based storage.
 | Item | Status | Detail |
 |---|---|---|
 | **Public Open-Source Repository** | ✅ | GitHub + MIT License |
-| **Functional Demo App URL** | ✅ | Backend: `https://4nmncatsvaol2rvmptexmxeoea0myqrr.lambda-url.ap-southeast-3.on.aws/` (`GET /api/v1/health` live OK) |
+| **Functional Demo App URL** | ✅ | Frontend: `https://d2sbinyjz34sz4.cloudfront.net/` (SPA + `/api/v1/*` proxy live) · Backend API: `https://4nmncatsvaol2rvmptexmxeoea0myqrr.lambda-url.ap-southeast-3.on.aws/` |
 | **Video Demo (≤3 Menit)** | ⏳ | Script siap: `docs/DEMO-SCRIPT.md` — rekam via YouTube/Vimeo |
 | **Dokumentasi Tools** | ✅ | README + `docs/ARCHITECTURE.md` + `docs/COCKROACHDB-AGENT-READY.md` + `docs/MCP-STATUS.md` |
 
@@ -251,7 +252,7 @@ docker compose up -d --build   # nginx:80, proxy /api/v1 ke Lambda
 - [x] Agent Skills Repo (tool #4, vendored 34 skills)
 - [x] OpenRouter LLM + embeddings
 - [x] AWS Lambda + S3 + EventBridge + CloudWatch
-- [x] Functional Demo URL (backend live: `/api/v1/health` OK)
+- [x] Functional Demo URL (frontend live via CloudFront + backend `/api/v1/health` OK)
 - [ ] Video Demo ≤3 menit (script: `docs/DEMO-SCRIPT.md`)
 - [x] Dokumentasi tools (README + docs/ARCHITECTURE.md + docs/MCP-STATUS.md)
 - [x] Public repo + MIT License
