@@ -45,10 +45,13 @@ jobs:
       - name: Install ccloud CLI
         run: |
           if ! command -v ccloud &> /dev/null; then
+            # tarball punya entry './' → ekstrak ke subdir milik runner (bukan /tmp
+            # yang tak bisa di-chmod oleh non-root), lalu taruh di PATH.
+            mkdir -p /tmp/ccloud-cli
             curl -fsSL https://binaries.cockroachdb.com/ccloud/ccloud_linux-amd64_0.6.12.tar.gz -o /tmp/ccloud.tar.gz
-            tar -xzf /tmp/ccloud.tar.gz -C /tmp
-            chmod +x /tmp/ccloud
-            echo "/tmp" >> "$GITHUB_PATH"
+            tar -xzf /tmp/ccloud.tar.gz -C /tmp/ccloud-cli
+            chmod +x /tmp/ccloud-cli/ccloud
+            echo "/tmp/ccloud-cli" >> "$GITHUB_PATH"
           fi
           ccloud --version
 
