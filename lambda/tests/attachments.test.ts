@@ -129,13 +129,13 @@ describe("attachments — create", () => {
     expect(body.ok).toBe(true);
     expect(body.nodeId).toBeTruthy();
 
-    const nodeInsert = crdb.executes.find((c) => c.sql.includes("INSERT INTO memory_nodes"));
+    const nodeInsert = crdb.executes.find((c: ExecuteCall) => c.sql.includes("INSERT INTO memory_nodes"));
     expect(nodeInsert).toBeTruthy();
     expect(nodeInsert!.sql).toContain("'attachment'"); // kind di-hardcode di SQL
     expect(nodeInsert!.params?.[2]).toBe(IMAGE_ATTACHMENT.title);
     expect(nodeInsert!.params?.[3]).toBe(IMAGE_ATTACHMENT.embeddedNarrative.slice(0, 200));
 
-    const attInsert = crdb.executes.find((c) => c.sql.includes("INSERT INTO attachments"));
+    const attInsert = crdb.executes.find((c: ExecuteCall) => c.sql.includes("INSERT INTO attachments"));
     expect(attInsert).toBeTruthy();
     expect(attInsert!.params?.[2]).toBe("image");
     expect(attInsert!.params?.[7]).toBe(IMAGE_ATTACHMENT.s3Key);
@@ -163,7 +163,7 @@ describe("attachments — create", () => {
       "dev-1",
     );
     expect(res.statusCode).toBe(400);
-    expect(crdb.executes.some((c) => c.sql.includes("INSERT INTO memory_nodes"))).toBe(false);
+    expect(crdb.executes.some((c: ExecuteCall) => c.sql.includes("INSERT INTO memory_nodes"))).toBe(false);
   });
 
   it("rejects missing embeddedNarrative (400)", async () => {
@@ -214,7 +214,7 @@ describe("attachments — create", () => {
     );
     expect(res.statusCode).toBe(200);
     expect(JSON.parse(res.body).ok).toBe(true);
-    expect(crdb.executes.some((c) => c.sql.includes("INSERT INTO attachments"))).toBe(true);
+    expect(crdb.executes.some((c: ExecuteCall) => c.sql.includes("INSERT INTO attachments"))).toBe(true);
   });
 });
 
@@ -249,7 +249,7 @@ describe("attachments — delete", () => {
     const res = await handleDeleteAttachment("a1", crdb, s3, "tok-1", "dev-1");
     expect(res.statusCode).toBe(200);
     expect(s3.deleteMediaObject).toHaveBeenCalledWith(`media/${USER}/abc123.jpg`);
-    expect(crdb.executes.some((c) => c.sql.includes("DELETE FROM memory_nodes"))).toBe(true);
+    expect(crdb.executes.some((c: ExecuteCall) => c.sql.includes("DELETE FROM memory_nodes"))).toBe(true);
   });
 
   it("deletes node even when S3 object missing (best-effort)", async () => {
@@ -259,7 +259,7 @@ describe("attachments — delete", () => {
     s3.deleteMediaObject = vi.fn(async () => { throw new Error("NoSuchKey"); });
     const res = await handleDeleteAttachment("a1", crdb, s3, "tok-1", "dev-1");
     expect(res.statusCode).toBe(200);
-    expect(crdb.executes.some((c) => c.sql.includes("DELETE FROM memory_nodes"))).toBe(true);
+    expect(crdb.executes.some((c: ExecuteCall) => c.sql.includes("DELETE FROM memory_nodes"))).toBe(true);
   });
 
   it("returns 404 when attachment not found", async () => {
