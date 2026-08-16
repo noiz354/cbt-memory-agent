@@ -14,7 +14,7 @@ import type { LLMProviderId } from "@/shared/lib/llmRegistry";
 import { getProvider, getModel } from "@/shared/lib/llmRegistry";
 import { getApiKey } from "@/shared/lib/byokKeyManager";
 import { getAuthHeaders } from "@/shared/lib/authSession";
-import { notifyUnauthorized } from "@/shared/lib/apiClient";
+import { notifyUnauthorized, RateLimitError, parseRetryAfterMs, isRateLimitError } from "@/shared/lib/apiClient";
 import { generateOnDevice } from "@/shared/lib/onDeviceLLM";
 
 // ─────────────────────────────────────────────
@@ -165,6 +165,9 @@ export async function callLLMWithFallback(
     return await callLLM({ providerId: "openrouter", messages }, onStream, signal);
   } catch (err) {
     if (isAbortError(err)) throw err;
+    // 429 harus muncul apa adanya (rate limit), bukan dibungkus generik —
+    // chatStore menampilkan pesan rate-limit yang bermakna.
+    if (isRateLimitError(err)) throw err;
     throw new Error(`All LLM fallbacks failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
@@ -252,6 +255,13 @@ async function callBackendProxy(
 
   if (!response.ok) {
     if (response.status === 401) notifyUnauthorized();
+    if (response.status === 429) {
+      const retryAfterMs = parseRetryAfterMs(response.headers.get("Retry-After"));
+      throw new RateLimitError(
+        `Backend rate limit reached (429). Please wait and try again.`,
+        retryAfterMs,
+      );
+    }
     throw new Error(`Backend proxy returned ${response.status}: ${response.statusText}`);
   }
 
@@ -394,6 +404,12 @@ async function callBYOK(
 
   if (!response.ok) {
     const errorText = await response.text().catch(() => "");
+    if (response.status === 429) {
+      throw new RateLimitError(
+        `${provider.name} rate limit reached (429): ${errorText.slice(0, 120)}`,
+        parseRetryAfterMs(response.headers.get("Retry-After")),
+      );
+    }
     throw new Error(`${provider.name} API returned ${response.status}: ${errorText.slice(0, 200)}`);
   }
 

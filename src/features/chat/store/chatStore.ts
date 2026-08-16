@@ -6,6 +6,7 @@ import { uid } from "@/shared/lib/format";
 import { useAppStore } from "@/shared/store/appStore";
 import { getAuthHeaders } from "@/shared/lib/authSession";
 import { callLLMWithFallback, isAbortError, type LLMMessage } from "@/shared/lib/llmClient";
+import { isRateLimitError } from "@/shared/lib/apiClient";
 import { apiClient } from "@/shared/lib/apiClient";
 import { metric } from "@/shared/lib/metrics";
 import { track, TELEMETRY_EVENTS } from "@/shared/lib/telemetryEvents";
@@ -288,6 +289,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       } catch (err) {
         // User-initiated cancel (barge-in / hard-halt) — bubbles already closed.
         if (isAbortError(err)) return;
+        const rateLimited = isRateLimitError(err);
         // All LLM fallbacks failed — show error message
         set((s) => ({
           isStreaming: false,
@@ -296,7 +298,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
               ? {
                   ...m,
                   streaming: false,
-                  content: `*— LLM unavailable. All providers failed (on-device, backend, and BYOK). Please try again later or configure an API key in Settings → LLM.*`,
+                  content: rateLimited
+                    ? `*— We're moving too fast. Rate limit hit — give it a minute, then try again.*`
+                    : `*— LLM unavailable. All providers failed (on-device, backend, and BYOK). Please try again later or configure an API key in Settings → LLM.*`,
                 }
               : m,
           ),
@@ -424,11 +428,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }, controller.signal);
       } catch (err) {
         if (isAbortError(err)) return;
+        const rateLimited = isRateLimitError(err);
         set((s) => ({
           isStreaming: false,
           messages: s.messages.map((m, i) =>
             i === s.messages.length - 1 && m.streaming
-              ? { ...m, streaming: false, content: `${m.content}\n\n*— resume failed —*` }
+              ? {
+                  ...m,
+                  streaming: false,
+                  content: rateLimited
+                    ? `${m.content}\n\n*— Rate limit hit — give it a minute, then try again.*`
+                    : `${m.content}\n\n*— resume failed —*`,
+                }
               : m,
           ),
         }));

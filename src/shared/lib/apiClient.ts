@@ -40,6 +40,46 @@ export function notifyUnauthorized(): void {
   }
 }
 
+/**
+ * Rate limiting from the backend / gateway / upstream provider (HTTP 429).
+ * Carries the server's suggested retry delay (`Retry-After`, seconds or
+ * HTTP-date) so callers can show a meaningful, timing-aware message.
+ */
+export class RateLimitError extends Error {
+  readonly retryAfterMs: number | null;
+
+  constructor(message: string, retryAfterMs: number | null = null) {
+    super(message);
+    this.name = "RateLimitError";
+    this.retryAfterMs = retryAfterMs;
+  }
+}
+
+export function isRateLimitError(err: unknown): boolean {
+  return err instanceof RateLimitError || (err as { name?: string })?.name === "RateLimitError";
+}
+
+/** Parse a `Retry-After` header value into ms (seconds or HTTP-date). */
+export function parseRetryAfterMs(header: string | null | undefined): number | null {
+  if (!header) return null;
+  const secs = Number(header);
+  if (Number.isFinite(secs) && secs >= 0) return secs * 1000;
+  const date = Date.parse(header);
+  return Number.isFinite(date) ? Math.max(0, date - Date.now()) : null;
+}
+
+/** Build a user-facing rate-limit error from a 429 response. */
+async function rateLimitError(res: Response): Promise<RateLimitError> {
+  const retryAfterMs = parseRetryAfterMs(res.headers.get("Retry-After"));
+  const body = await res.text().catch(() => "");
+  const hint = retryAfterMs !== null ? ` Try again in ~${Math.round(retryAfterMs / 1000)}s.` : "";
+  const detail = body.trim().slice(0, 120);
+  return new RateLimitError(
+    `Rate limit reached (429)${detail ? ` — ${detail}` : ""}.${hint}`,
+    retryAfterMs,
+  );
+}
+
 interface ApiOptions extends RequestInit {
   token?: string;
   deviceId?: string;
@@ -63,6 +103,7 @@ async function api<T>(path: string, options: ApiOptions = {}): Promise<T> {
 
   if (!res.ok) {
     if (res.status === 401) notifyUnauthorized();
+    if (res.status === 429) throw await rateLimitError(res);
     const body = await res.text().catch(() => "");
     throw new Error(`API ${res.status}: ${res.statusText} — ${body.slice(0, 200)}`);
   }
@@ -233,6 +274,7 @@ export const apiClient = {
 
     if (!res.ok) {
       if (res.status === 401) notifyUnauthorized();
+      if (res.status === 429) throw await rateLimitError(res);
       throw new Error(`API ${res.status}: ${res.statusText}`);
     }
 
