@@ -73,6 +73,30 @@ describe("callLLM backend-proxy SSE", () => {
     expect(chunks[chunks.length - 1].done).toBe(true);
   });
 
+  it("sends backendUserText (raw user message) as userMessage — not the wrapped CBT prompt", async () => {
+    const sse = 'data: {"t":"Halo!"}\n\n' + "data: [DONE]\n\n";
+    const fetchMock = vi.fn().mockResolvedValue(sseResponse(sse));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const wrapped =
+      'User message: "halo, apa kabar?"\n\nRespond using CBT techniques: identify the automatic thought.';
+    const result = await callLLM(
+      {
+        providerId: "backend-proxy",
+        messages: [{ role: "user", content: wrapped }],
+        backendUserText: "halo, apa kabar?",
+      },
+      () => {},
+    );
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/v1/chat/turn");
+    const body = JSON.parse(String(init.body));
+    expect(body.userMessage).toBe("halo, apa kabar?");
+    expect(body.userMessage).not.toBe(wrapped);
+    expect(result.content).toBe("Halo!");
+  });
+
   it("does not emit injectedMemoryIds when the event is absent", async () => {
     const sse = 'data: {"t":"ok"}\n\n' + "data: [DONE]\n\n";
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(sseResponse(sse)));
@@ -109,6 +133,26 @@ describe("callLLM backend-proxy SSE", () => {
     await expect(
       callLLM({ providerId: "backend-proxy", messages: [{ role: "user", content: "hi" }] }),
     ).rejects.toThrow(/502/);
+  });
+
+  it("throws on a backend error frame instead of streaming it as assistant content", async () => {
+    const sse =
+      'data: {"error":true,"code":"chat_turn_failed","message":"Terjadi kendala teknis. Coba lagi dalam beberapa saat."}\n\n' +
+      "data: [DONE]\n\n";
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(sseResponse(sse)));
+
+    const chunks: LLMStreamChunk[] = [];
+    await expect(
+      callLLM(
+        { providerId: "backend-proxy", messages: [{ role: "user", content: "hi" }] },
+        (chunk) => chunks.push(chunk),
+      ),
+    ).rejects.toThrow(/Terjadi kendala teknis/);
+
+    // The error text must NOT be emitted as streamed content — otherwise it
+    // would render as a fake assistant reply and bypass the LLM fallback chain.
+    expect(chunks.filter((c) => !c.done).length).toBe(0);
   });
 
   it("aborts cleanly when the signal is aborted before the stream resolves", async () => {

@@ -249,22 +249,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const messages: LLMMessage[] = [{ role: "user", content: reply }];
         let fullResponse = "";
 
-        await callLLMWithFallback(messages, (chunk) => {
-          if (chunk.injectedMemoryIds && chunk.injectedMemoryIds.length > 0) {
-            get().recordBackendRecall(chunk.injectedMemoryIds);
-          }
-          if (chunk.recalledTitles && chunk.recalledTitles.length > 0) {
-            get().recordBackendRecallTitles(chunk.recalledTitles);
-          }
-          if (!chunk.done) {
-            fullResponse += chunk.delta;
-            get().appendStreamToken(chunk.delta);
-          } else {
-            get().finishStream();
-            metric.streamDone();
-            track(TELEMETRY_EVENTS.streamDone);
-          }
-        }, controller.signal);
+        await callLLMWithFallback(
+          messages,
+          (chunk) => {
+            if (chunk.injectedMemoryIds && chunk.injectedMemoryIds.length > 0) {
+              get().recordBackendRecall(chunk.injectedMemoryIds);
+            }
+            if (chunk.recalledTitles && chunk.recalledTitles.length > 0) {
+              get().recordBackendRecallTitles(chunk.recalledTitles);
+            }
+            if (!chunk.done) {
+              fullResponse += chunk.delta;
+              get().appendStreamToken(chunk.delta);
+            } else {
+              get().finishStream();
+              metric.streamDone();
+              track(TELEMETRY_EVENTS.streamDone);
+            }
+          },
+          controller.signal,
+          { backendUserText: text || "(media only)" },
+        );
 
         // Sync to backend (CockroachDB) — fire and forget
         const auth = getAuthHeaders();

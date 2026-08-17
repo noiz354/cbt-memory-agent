@@ -304,6 +304,18 @@ export const apiClient = {
 
             try {
               const json = JSON.parse(trimmed.slice(6));
+              // Structured backend error frames ({error:true}) are NOT content —
+              // fail the sync so the caller never persists the backend's generic
+              // error text as a real assistant turn.
+              if (json?.error === true) {
+                const err = new Error(
+                  typeof json.message === "string" && json.message
+                    ? json.message
+                    : "Backend proxy returned an error",
+                );
+                err.name = "BackendErrorFrame";
+                throw err;
+              }
               const delta = json.t ?? "";
               if (Array.isArray(json.injectedMemoryIds)) {
                 onChunk?.("", true);
@@ -323,7 +335,10 @@ export const apiClient = {
                 fullContent += delta;
                 onChunk?.(delta, false);
               }
-            } catch {
+            } catch (err) {
+              // Structured backend error frames must propagate; malformed SSE
+              // lines are still skipped.
+              if (err instanceof Error && err.name === "BackendErrorFrame") throw err;
               // Skip malformed SSE lines
             }
           }

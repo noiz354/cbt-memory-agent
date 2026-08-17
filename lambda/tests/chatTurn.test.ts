@@ -9,7 +9,8 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { getMemoryContext } from "../handlers/chatTurn";
+import { context } from "@opentelemetry/api";
+import { getMemoryContext, handleChatTurn } from "../handlers/chatTurn";
 
 function crdbMock(heuristicRows: any[] = [], vectorRows: any[] = [], keywordRows: any[] = []) {
   const queries: { sql: string; params?: unknown[] }[] = [];
@@ -95,5 +96,69 @@ describe("getMemoryContext — hybrid retrieval", () => {
     const llm = llmMock(EMBED);
     const res = await getMemoryContext(crdb, llm, "u1", [], "nothing");
     expect(res.rows).toEqual([]);
+  });
+
+  it("sanitizes punctuation-heavy search text before plainto_tsquery (no crash)", async () => {
+    const crdb = crdbMock(H, V, []);
+    const llm = llmMock(EMBED);
+    const messy =
+      'User message: "halo, saya senang banget hari ini" (makan 3x sehari). Respond using CBT techniques: identify the automatic thought!';
+    const res = await getMemoryContext(crdb, llm, "u1", [], messy);
+    expect(res.mode).toBe("hybrid");
+    const keywordParam = crdb.queries[1].params?.[1] as string;
+    expect(keywordParam).toBeDefined();
+    expect(keywordParam).not.toMatch(/["':,.!?()]/);
+    expect(keywordParam).toContain("halo saya senang banget hari ini");
+    expect(keywordParam.length).toBeLessThanOrEqual(500);
+  });
+
+  it("falls through to vector+fuse when the keyword query throws (no crash)", async () => {
+    const queries: { sql: string; params?: unknown[] }[] = [];
+    const crdb = {
+      async query(sql: string, params?: unknown[]) {
+        queries.push({ sql, params });
+        if (sql.includes("@@" + " plainto_tsquery")) throw new Error("syntax error in TSQuery");
+        if (sql.includes("ORDER BY e.embedding <=> $1::vector")) return V;
+        return H;
+      },
+    };
+    const llm = llmMock(EMBED);
+    const res = await getMemoryContext(crdb as any, llm, "u1", [], "anxious about noise");
+    expect(res.mode).toBe("hybrid");
+    expect(res.rows.map((r) => r.id)).toContain("v1");
+  });
+});
+
+describe("handleChatTurn — runtime failure path", () => {
+  it("emits a structured error frame, not a fake assistant t-frame", async () => {
+    const crdb: any = {
+      queryOne: vi.fn(async () => {
+        throw new Error("db down");
+      }),
+      query: vi.fn(async () => []),
+      execute: vi.fn(async () => {}),
+    };
+    const event = {
+      httpMethod: "POST",
+      body: JSON.stringify({ v: 1, sessionId: "s1", userMessage: "halo" }),
+    } as any;
+
+    const llm = {
+      apiKey: "test",
+      generateEmbedding: vi.fn(async () => new Array(1024).fill(0)),
+      streamChat: vi.fn(),
+      chat: vi.fn(),
+      healthCheck: vi.fn(),
+    } as any;
+
+    const res = await handleChatTurn(event, crdb, llm, "token", "dev", context.active());
+
+    expect(res.statusCode).toBe(200);
+    // Distinct error frame the frontend can detect — NOT a content t-frame.
+    expect(res.body).toContain('"error":true');
+    expect(res.body).toContain('"code":"chat_turn_failed"');
+    expect(res.body).toContain('"message":"Terjadi kendala teknis. Coba lagi dalam beberapa saat."');
+    expect(res.body).not.toContain('"t":"Terjadi');
+    expect(res.body).toContain("data: [DONE]");
   });
 });

@@ -33,6 +33,13 @@ export interface LLMRequest {
   temperature?: number;
   maxTokens?: number;
   stream?: boolean;
+  /**
+   * Raw user utterance sent as `userMessage` to the backend-proxy `/chat/turn`.
+   * Defaults to the joined user-message content; chatStore passes the real user
+   * text here so backend memory-recall runs against the actual message instead of
+   * the wrapped CBT prompt (which would crash plainto_tsquery).
+   */
+  backendUserText?: string;
 }
 
 export interface LLMResponse {
@@ -117,6 +124,7 @@ export async function callLLM(
     temperature: request.temperature ?? 0.7,
     maxTokens: request.maxTokens ?? 2048,
     stream: request.stream ?? (onStream !== undefined),
+    backendUserText: request.backendUserText,
   };
 
   // Route by provider type
@@ -143,6 +151,7 @@ export async function callLLMWithFallback(
   messages: LLMMessage[],
   onStream?: LLMStreamCallback,
   signal?: AbortSignal,
+  options?: { backendUserText?: string },
 ): Promise<LLMResponse> {
   // 1. Coba on-device (WebLLM)
   try {
@@ -154,7 +163,7 @@ export async function callLLMWithFallback(
 
   // 2. Coba backend proxy
   try {
-    return await callLLM({ providerId: "backend-proxy", messages }, onStream, signal);
+    return await callLLM({ providerId: "backend-proxy", messages, ...options }, onStream, signal);
   } catch (err) {
     if (isAbortError(err)) throw err;
     console.warn("[LLM] Backend failed, trying BYOK:", err);
@@ -233,10 +242,12 @@ async function callBackendProxy(
   const body = {
     v: 1,
     sessionId: `proxy_${Date.now()}`,
-    userMessage: request.messages
-      .filter((m) => m.role === "user")
-      .map((m) => m.content)
-      .join("\n"),
+    userMessage:
+      request.backendUserText ??
+      request.messages
+        .filter((m) => m.role === "user")
+        .map((m) => m.content)
+        .join("\n"),
     memoryIds: [],
     clientTs: new Date().toISOString(),
     deviceOnly: true,
@@ -302,6 +313,19 @@ async function parseBackendProxySSE(
           if (!trimmed.startsWith("data: ")) continue;
           try {
             const json = JSON.parse(trimmed.slice(6));
+            // Structured backend error frames ({error:true}) are NOT content —
+            // fail the turn so the LLM fallback chain (backend → BYOK) advances
+            // and chatStore renders the correct error message. Never stream the
+            // backend's generic text as a fake assistant reply.
+            if (json?.error === true) {
+              const err = new Error(
+                typeof json.message === "string" && json.message
+                  ? json.message
+                  : "Backend proxy returned an error",
+              );
+              err.name = "BackendErrorFrame";
+              throw err;
+            }
             const delta = json.t ?? "";
             // Final event: {"t":"","injectedMemoryIds":[...],"recalledTitles":[...]} —
             // backend recall evidence.
@@ -319,7 +343,10 @@ async function parseBackendProxySSE(
               fullContent += delta;
               onStream({ delta, done: false });
             }
-          } catch {
+          } catch (err) {
+            // Structured backend error frames must propagate (they fail the
+            // turn); malformed SSE lines are still skipped.
+            if (err instanceof Error && err.name === "BackendErrorFrame") throw err;
             // Skip malformed SSE lines
           }
         }

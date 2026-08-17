@@ -28,6 +28,21 @@ const chatTurnSchema = z.object({
   deviceOnly: z.literal(true).optional(),
 });
 
+/**
+ * Sanitize free-form user text before it reaches plainto_tsquery / to_tsvector.
+ * CockroachDB (PostgreSQL) throws `syntax error in TSQuery` on punctuation-heavy
+ * input — the frontend's wrapped CBT prompt is full of quotes, colons, and
+ * punctuation. Keep only ASCII word characters + whitespace, collapse runs of
+ * spaces, and cap the length so a pathological input can never crash the turn.
+ */
+function sanitizeSearchText(text: string): string {
+  const cleaned = text
+    .replace(/[^A-Za-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return cleaned.slice(0, 500);
+}
+
 const SYSTEM_PROMPT = `You are a supportive CBT (Cognitive-Behavioral Therapy) assistant.
 Follow these guardrails:
 - Respond with warmth, curiosity, and evidence-based CBT techniques (cognitive restructuring, Socratic questioning, behavioral activation).
@@ -181,7 +196,11 @@ export async function handleChatTurn(
       headers: cors,
       body:
         "data: " +
-        JSON.stringify({ t: "Terjadi kendala teknis. Coba lagi dalam beberapa saat." }) +
+        JSON.stringify({
+          error: true,
+          code: "chat_turn_failed",
+          message: "Terjadi kendala teknis. Coba lagi dalam beberapa saat.",
+        }) +
         "\n\ndata: [DONE]\n\n",
     };
   }
@@ -268,18 +287,26 @@ export async function getMemoryContext(
   const embeddingMs = Date.now() - startedAt;
 
   const keywordStartedAt = Date.now();
-  const keywordRows = await crdb.query<MemoryContext>(
-    `SELECT mn.id, mn.title, COALESCE(mn.excerpt, '') AS excerpt,
-            COALESCE(mn.crisis_flag, false) AS crisisFlag
-     FROM memory_nodes mn
-     WHERE mn.user_id = $1::uuid
-       AND mn.verified = true
-       AND mn.confidence >= 0.6
-       AND to_tsvector('english', mn.title || ' ' || COALESCE(mn.excerpt, '')) @@ plainto_tsquery('english', $2)
-     ORDER BY ts_rank(to_tsvector('english', mn.title || ' ' || COALESCE(mn.excerpt, '')), plainto_tsquery('english', $2)) DESC
-     LIMIT $3`,
-    [userId, userMessage, 8],
-  );
+  let keywordRows: MemoryContext[] = [];
+  try {
+    const sanitized = sanitizeSearchText(userMessage);
+    keywordRows = await crdb.query<MemoryContext>(
+      `SELECT mn.id, mn.title, COALESCE(mn.excerpt, '') AS excerpt,
+              COALESCE(mn.crisis_flag, false) AS crisisFlag
+       FROM memory_nodes mn
+       WHERE mn.user_id = $1::uuid
+         AND mn.verified = true
+         AND mn.confidence >= 0.6
+         AND to_tsvector('english', mn.title || ' ' || COALESCE(mn.excerpt, '')) @@ plainto_tsquery('english', $2)
+       ORDER BY ts_rank(to_tsvector('english', mn.title || ' ' || COALESCE(mn.excerpt, '')), plainto_tsquery('english', $2)) DESC
+       LIMIT $3`,
+      [userId, sanitized, 8],
+    );
+  } catch (err) {
+    logger.warn("chat.keyword_failed", "Keyword query failed — vector+heuristic only", {
+      err: err instanceof Error ? err.message : String(err),
+    });
+  }
   const keywordMs = Date.now() - keywordStartedAt;
 
   const vectorRows = await crdb.query<MemoryContext>(
