@@ -42,7 +42,10 @@ module "lambda" {
   memory_size             = var.memory_size
   timeout                 = var.timeout
 
-  depends_on = [module.iam, module.ssm]
+  # module.oidc: role-policy CI diperbarui di-sequencing SEBELUM panggilan
+  # S3 CORS di apply yang sama (hindari IAM-propagation race di CI).
+
+  depends_on = [module.iam, module.ssm, module.oidc]
 }
 
 # EventBridge — agentic memory reflection cron (tiap 6 jam)

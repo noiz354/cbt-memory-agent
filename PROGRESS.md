@@ -431,3 +431,16 @@ Standardisasi penanganan error full-stack: satu taxonomy + envelope + choke poin
 - [x] **Badge jujur (LLM)** (`src/shared/lib/mediaUploadProbe.ts` `llmDetailMessage` + `OfflineBanner.tsx`) — saat backend lapor `quota_exhausted` badge **Backend degraded** + tooltip actionable. TDD 4 test.
 - [x] **Verifikasi** — typecheck ✓, frontend test **114/114**, lambda test **172/172**, build ✓.
 - [ ] **Opsional** — tambah $10 credit OpenRouter (di luar kode); verifikasi UI manual (badge pulih "ok", chat jalan, tooltip kuota hilang); monitor `llm.quota_exhausted` di CloudWatch/Mimir.
+
+## CI Terraform fix — PutBucketCors 403 + origin prod di IaC committed (2026-08-18)
+
+**Gejala**: CI deploy gagal `api error AccessDenied ... s3:PutBucketCORS` + plan CI mau mengubah CORS (tambah expose_headers/max_age, desir = localhost-only).
+
+**Akar masalah (2 lapis)**: (1) role CI `cbt-github-actions-deploy` statement `S3Buckets` TIDAK punya `s3:PutBucketCors`/`s3:DeleteBucketCors` (hanya Get) → setiap tulis CORS dari CI = 403. (2) `infra/terraform.tfvars` di-gitignore (berisi secret, tidak ada di CI) satu-satunya pemuat origin prod (`d2sbinyjz34sz4.cloudfront.net`) di `s3_cors_allowed_origins` → CI me-resolve default `variables.tf` = localhost-only → plan CI *ingin menghapus origin CloudFront* dari CORS live. Menambah izin saja justru akan menimpa live CORS dengan localhost-only → break prod CameraPip. Konfirmasi: state remote + live bucket sudah memuat KEDUA origin; plan lokal (dgn tfvars) CORS = **no-op**.
+
+- [x] **IAM least-privilege** (`infra/modules/oidc/main.tf` S3Buckets) — tambah `s3:PutBucketCors` + `s3:DeleteBucketCors` (scoped ke bucket media + frontend & /*; role self-grant via `iam:PutRolePolicy` yang sudah ada).
+- [x] **Origin prod dikomit di IaC** (`infra/variables.tf`) — default `s3_cors_allowed_origins` = `["http://localhost:5173", "https://d2sbinyjz34sz4.cloudfront.net"]` (precedent: domain sama sudah hard-coded di CSP frontend + nginx). CI (tanpa tfvars) kini menghasilkan kedua origin → CORS no-op di plan CI → tanpa panggilan PutBucketCors → 403 hilang; prod origin terjaga.
+- [x] **Sequencing anti-race** (`infra/root.tf:48`) — `module.lambda` `depends_on` + `module.oidc` → role-policy ter-apply sebelum panggilan S3 CORS pada apply yang sama; tanpa cycle (oidc hanya bergantung vars).
+- [x] **Verifikasi** — `terraform fmt` + `validate` ✓; `terraform plan` (profile aws-x-cdb): 3 changes = role_policy (+2 action) + bucket_policy frontend (canonize benign, OAC EWWRSYJJMZAO9 tetap) + lambda re-publish (deploy kode Bug-3 dari commit `5662b27`); CORS config = `no-op`.
+- [ ] **Post-deploy verifikasi CI** — setelah push, CI apply harus green; cek health endpoint (mapping `llm.quota_exhausted`) + header CSP/CORS CloudFront masih benar.
+- **Catatan** — `infra/terraform.tfvars` TIDAK dikomit (berisi secret: CRDB conn, OpenRouter, Resend, Grafana).

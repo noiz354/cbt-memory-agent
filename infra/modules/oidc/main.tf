@@ -195,6 +195,8 @@ resource "aws_iam_role_policy" "github_actions" {
           "s3:DeleteBucketPolicy",
           "s3:GetBucketAcl",
           "s3:GetBucketCors",
+          "s3:PutBucketCors",
+          "s3:DeleteBucketCors",
           "s3:GetBucketWebsite",
           "s3:GetBucketLogging",
           "s3:GetBucketNotification",

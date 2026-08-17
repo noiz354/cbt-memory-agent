@@ -111,9 +111,9 @@ variable "allowed_origin" {
 }
 
 variable "s3_cors_allowed_origins" {
-  description = "Origins yang diizinkan PUT/GET langsung ke bucket media dari browser (S3 CORS). Dev Vite = http://localhost:5173; prod = app_url/CloudFront."
+  description = "Origins yang diizinkan PUT/GET langsung ke bucket media dari browser (S3 CORS). Dev Vite = http://localhost:5173; prod CloudFront dikomit di sini (bukan hanya tfvars) agar CI (tanpa tfvars) tidak menimpa CORS live dengan localhost-only."
   type        = list(string)
-  default     = ["http://localhost:5173"]
+  default     = ["http://localhost:5173", "https://d2sbinyjz34sz4.cloudfront.net"]
 }
 
 variable "aws_account_id" {
