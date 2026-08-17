@@ -20,8 +20,9 @@ import {
 } from "@/shared/lib/onDeviceLLM";
 import { GlassPanel } from "@/shared/ui/GlassPanel";
 import { cn } from "@/shared/lib/cn";
+import { isHostedDeployment } from "@/shared/lib/env";
 import { useState, useEffect, useCallback } from "react";
-import { Key, Check, Loader2, Trash2, Zap, Cpu } from "lucide-react";
+import { Key, Check, Loader2, Trash2, Zap, Cpu, Info } from "lucide-react";
 import { toast } from "@/shared/store/toastStore";
 
 interface ConfiguredState {
@@ -32,6 +33,7 @@ interface ConfiguredState {
 }
 
 export function LlmPanel() {
+  const hosted = isHostedDeployment();
   const [configured, setConfigured] = useState<ConfiguredState[]>([]);
   const [selectedProvider, setSelectedProvider] = useState<LLMProviderId>("openrouter");
   const [selectedModel, setSelectedModel] = useState("");
@@ -149,21 +151,56 @@ export function LlmPanel() {
 
   return (
     <div className="grid gap-4">
+      {hosted && (
+        <div className="flex items-start gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4">
+          <Info className="size-5 shrink-0 text-amber-600" />
+          <div>
+            <p className="text-sm font-semibold text-amber-700">
+              Hosted deployment — on-device & BYOK unavailable
+            </p>
+            <p className="mt-1 text-xs text-amber-700/80">
+              Browser requests are restricted by the production Content-Security-Policy
+              (connect-src 'self'), so the WebLLM model download and direct provider API
+              calls are blocked here. The active provider is the <strong>backend proxy</strong>
+              (secure, no API key needed). Self-host or run locally to enable on-device
+              inference and bring-your-own-key.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Fallback chain explanation */}
       <GlassPanel className="p-5">
         <h2 className="font-display font-semibold">LLM providers & API keys</h2>
         <p className="mt-1 text-sm text-ink-mute">
-          Fallback chain: <strong>On-device</strong> → <strong>Backend</strong> → <strong>Your key (BYOK)</strong>.
-          Keys are encrypted with WebCrypto and stored in IndexedDB — never sent to our servers.
+          Fallback chain: <strong>On-device</strong> → <strong>Backend</strong> →{" "}
+          <strong>Your key (BYOK)</strong>. Keys are encrypted with WebCrypto and stored in
+          IndexedDB — never sent to our servers.
         </p>
 
         {/* Fallback chain visual */}
-        <div className="mt-3 flex items-center gap-2 text-xs">
-          <span className="rounded-lg bg-teal/10 px-2 py-1 font-medium text-teal">1. On-device (WebLLM)</span>
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+          <span
+            className={cn(
+              "rounded-lg px-2 py-1 font-medium",
+              hosted ? "bg-ink/10 text-ink-muted line-through" : "bg-teal/10 text-teal",
+            )}
+          >
+            1. On-device (WebLLM)
+          </span>
           <span className="text-ink-muted">→</span>
-          <span className="rounded-lg bg-ink/10 px-2 py-1 font-medium text-ink-muted">2. Backend proxy</span>
+          <span className="rounded-lg bg-teal/10 px-2 py-1 font-medium text-teal">
+            2. Backend proxy{hosted && <span className="ml-1">· active</span>}
+          </span>
           <span className="text-ink-muted">→</span>
-          <span className="rounded-lg bg-amber-500/10 px-2 py-1 font-medium text-amber-600">3. Your API key</span>
+          <span
+            className={cn(
+              "rounded-lg px-2 py-1 font-medium",
+              hosted ? "bg-amber-500/10 text-amber-600 line-through" : "bg-amber-500/10 text-amber-600",
+            )}
+          >
+            3. Your API key
+          </span>
         </div>
 
         {/* On-device model status / preload */}
@@ -177,10 +214,10 @@ export function LlmPanel() {
               <button
                 type="button"
                 onClick={handlePreload}
-                disabled={preloading || onDeviceProgress > 0}
+                disabled={hosted || preloading || onDeviceProgress > 0}
                 className={cn(
                   "flex items-center gap-1 rounded-lg px-3 py-1 text-xs font-semibold text-white",
-                  preloading || onDeviceProgress > 0 ? "bg-line" : "bg-teal hover:bg-teal/80",
+                  hosted || preloading || onDeviceProgress > 0 ? "bg-line" : "bg-teal hover:bg-teal/80",
                 )}
               >
                 {preloading ? <Loader2 className="size-3 animate-spin" /> : <Zap className="size-3" />}
@@ -198,11 +235,13 @@ export function LlmPanel() {
             />
           </div>
           <p className="mt-1 text-[11px] text-ink-muted">
-            {isOnDeviceEngineReady()
-              ? "Phi-3-mini ready — runs fully offline, no data leaves the device."
-              : onDeviceProgress > 0
-                ? `Downloading model… ${Math.round(onDeviceProgress * 100)}%`
-                : "Not loaded yet. Preload once to enable offline generation."}
+            {hosted
+              ? "Unavailable in hosted deployment — WebLLM model download is blocked by the production CSP."
+              : isOnDeviceEngineReady()
+                ? "Phi-3-mini ready — runs fully offline, no data leaves the device."
+                : onDeviceProgress > 0
+                  ? `Downloading model… ${Math.round(onDeviceProgress * 100)}%`
+                  : "Not loaded yet. Preload once to enable offline generation."}
           </p>
         </div>
       </GlassPanel>
@@ -213,6 +252,12 @@ export function LlmPanel() {
         <p className="mt-1 text-sm text-ink-muted">
           Select a provider and model, then paste your API key.
         </p>
+        {hosted && (
+          <p className="mt-1 text-xs text-amber-600">
+            API keys are stored locally regardless, but in this hosted deployment they will not
+            be used — direct provider calls are blocked by the production CSP.
+          </p>
+        )}
 
         {/* Provider selector */}
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -264,7 +309,7 @@ export function LlmPanel() {
             <button
               type="button"
               onClick={handleSave}
-              disabled={saving || !inputKey.trim()}
+              disabled={hosted || saving || !inputKey.trim()}
               className={cn(
                 "flex items-center gap-1 rounded-xl px-4 text-sm font-semibold text-white",
                 saving || !inputKey.trim() ? "bg-line" : "bg-teal hover:bg-teal/80",
@@ -321,7 +366,7 @@ export function LlmPanel() {
                   <button
                     type="button"
                     onClick={() => handleTest(c.providerId, c.modelId)}
-                    disabled={testing === `${c.providerId}::${c.modelId}`}
+                    disabled={hosted || testing === `${c.providerId}::${c.modelId}`}
                     className="flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-teal hover:bg-teal/10"
                   >
                     {testing === `${c.providerId}::${c.modelId}` ? (

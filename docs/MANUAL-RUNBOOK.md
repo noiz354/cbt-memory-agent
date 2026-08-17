@@ -3,8 +3,8 @@
 > Runbook pengetesan **manusia** terhadap fitur yang sudah **live** di produksi:
 > Emotional Media Attachments, Reflection Loop (MCP + cluster health gate + skills),
 > recall hybrid RRF, **11 perbaikan gap audit integrasi frontend-backend**
-> (commits `158cc2a`..`76328ed`, `docs/FRONTEND-INTEGRATION-AUDIT.md`), dan
-> **Error Standardization (ADR-008, §10)**.
+> (commits `158cc2a`..`76328ed`, `docs/FRONTEND-INTEGRATION-AUDIT.md`),
+> **Error Standardization (ADR-008, §10)**, dan **Honest-mode LLM (BYOK/On-device, §11)**.
 > Update: 2026-08-18. Backend: Lambda Function URL (`CBT Memory Agent`),
 > DB: CockroachDB Cloud `woozy-grivet` (v26.2.5).
 
@@ -342,3 +342,38 @@ Harapan: log JSON berisi `level:"error"`, `event:<code>`, `code:<code>`, `catego
 | E5 | Log error 1 baris JSON (`code`, `trace_id`) di CloudWatch | §10.2 | ☐ |
 | E6 | `app.error.count` ada di Mimir/Grafana | §10.3 | ☐ |
 | E7 | CameraPip "Analyze & save" error toast menampilkan pesan CORS/network diagnosable (bukan `Failed to fetch` mentah) | UI: fail kamera/CORS lalu "Index failed" | ☐ |
+
+---
+
+## 11. Honest-mode LLM — BYOK/On-device pada hosted deployment
+
+> **Fakta**: CSP produksi **memblokir** on-device WebLLM (unduh model dari huggingface.co)
+> dan BYOK (panggilan langsung ke provider API) — keduanya berjalan di browser user, bukan
+> di CloudFront. Provider yang aktif di prod hanyalah **backend-proxy** (same-origin
+> `/api/v1/chat/turn`). UI kini jujur menampilkannya (`src/shared/lib/env.ts` +
+> `src/features/privacy/components/LlmPanel.tsx`).
+
+### 11.1 Verifikasi hosted mode (CloudFront)
+
+1. Buka **Settings → LLM** di `https://d2sbinyjz34sz4.cloudfront.net/settings/privacy` (tab LLM).
+2. **Pass** bila tampil banner amber: *"Hosted deployment — on-device & BYOK unavailable"*
+   dengan penjelasan CSP + catatan bahwa backend-proxy yang aktif.
+3. Riset visual fallback chain: **On-device** dan **Your API key** berlalu strikethrough,
+   **Backend proxy** ditandai *· active*.
+4. Tombol **Preload**, **Save**, dan **Test** **disabled** (abu-abu); label on-device
+   = *"Unavailable in hosted deployment …"*.
+
+### 11.2 Verifikasi lokal mode (localhost / self-host) — fitur tetap utuh
+
+1. Jalankan Vite dev (`npm run dev`) → buka `http://localhost:5173/settings/privacy`.
+2. **Pass** bila TIDAK ada banner amber; tombol **Preload** aktif; opsi provider BYOK
+   bisa dipilih & disimpan (test koneksi tetap dinonaktifkan hanya di hosted).
+
+### Checklist Honest-mode LLM
+
+| # | Verifikasi | Command ref | Pass/Fail |
+|---|---|---|---|
+| L1 | Banner amber ada di prod (CloudFront) | §11.1.2 | ☐ |
+| L2 | Fallback-chain strikethrough + "backend active" di prod | §11.1.3 | ☐ |
+| L3 | Preload/Save/Test disabled di prod | §11.1.4 | ☐ |
+| L4 | Tidak ada banner di localhost (fitur On-device/BYOK utuh) | §11.2.2 | ☐ |

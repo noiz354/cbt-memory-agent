@@ -394,3 +394,12 @@ Standardisasi penanganan error full-stack: satu taxonomy + envelope + choke poin
 - [x] **Tests** — `lambda/tests/errors.test.ts` (15: AppError/catalog/envelope/classifyError/reportError+spies) → **157/157** (17 file) ✓; `src/shared/lib/errors.test.ts` (12) → **87/87** (12 file) ✓; `npm run typecheck` + `npm run build` (root+lambda) ✓.
 - [x] **CloudWatch** — `scripts/setup-cloudwatch.sh`: +3 metric filter (`error_count` = `{$.level="error"}`, `dependency_error_count`, `internal_error_count`) + alarm `ApplicationErrorRate` (>20/5min, SEV2) + dokumen ADR-008.
 - [ ] **Masih terbuka (opsional)** — re-run Lighthouse prod build; verifikasi dashboard error di Grafana UI; monitor real `error_count` setelah deploy; beberapa error handler kini melapor sebagai `internal.unhandled` (handlers tidak menyematkan kode eksplisit) — katalog siap dipakai bila ingin granularitas per-domain di Mimir.
+
+## Honest-mode LLM — BYOK/On-device di hosted deployment (2026-08-18)
+
+**Konteks**: Pada deploy CloudFront, CSP produksi (`connect-src 'self' blob:` — `infra/modules/frontend/main.tf:119` = `nginx.conf:49`) memblokir (a) unduhan model WebLLM dari huggingface.co dan (b) semua panggilan BYOK cross-origin ke provider API. Ini berjalan di browser user (bukan CloudFront); backend-proxy tetap aktif (same-origin `/api/v1/chat/turn`). Sebelumnya UI LlmPanel tetap menawarkan Preload/Test/API key yang pasti gagal.
+
+- [x] **Deteksi lingkungan** (`src/shared/lib/env.ts` baru) — `isLocalHostname()` (loopback: localhost/127.0.0.1/::1) + `isHostedDeployment()` (non-loopback / window tidak ada → false); TDD 5 test.
+- [x] **Honest-mode UI** (`src/features/privacy/components/LlmPanel.tsx`) — saat hosted: banner amber penjelasan CSP + provider aktif backend-proxy; tombol **Preload**, **Save key**, **Test** dinonaktifkan; label on-device → "Unavailable in hosted deployment"; visual fallback-chain menandai on-device & BYOK strikethrough + backend "active". Fitur tetap utuh bagi self-host/Vite dev (localhost).
+- [x] **Verifikasi** — `npm run typecheck` ✓, `npm test` **92/92** ✓, `npm run build` ✓ (hanya warning chunk-size yang sudah ada).
+- [ ] **Keputusan tersimpan opsional** — untuk mengaktifkan on-device/BYOK di prod, perlu perlonggar CSP / self-host model weights / proxy BYOK server-side (ADR-008 lanjutan, bukan bagian perubahan ini).
