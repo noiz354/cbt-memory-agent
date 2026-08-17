@@ -58,3 +58,18 @@ export function combineBackendStatus(
   }
   return { status: "ok", detail: null };
 }
+
+/**
+ * Pesan detail LLM untuk badge, dari nilai `health.llm` backend.
+ * `quota_exhausted` → actionable (tambah credit / pasang key sendiri);
+ * `unavailable` → terse; lainnya (available) → null (tidak perlu detail).
+ */
+export function llmDetailMessage(llm: string | undefined | null): string | null {
+  if (llm === "quota_exhausted") {
+    return "Backend LLM kehabisan kuota harian — tambah credit OpenRouter atau pasang API key sendiri (Settings → LLM).";
+  }
+  if (llm === "unavailable") {
+    return "Backend LLM tidak tersedia saat ini.";
+  }
+  return null;
+}

@@ -12,19 +12,28 @@ export async function handleHealth(
   llm: OpenRouterClient,
   s3: S3ClientService,
 ): Promise<APIGatewayProxyResult> {
-  const [crdbOk, llmOk, s3Ok] = await Promise.all([
+  const [crdbOk, llmAvail, s3Ok] = await Promise.all([
     crdb.healthCheck(),
-    llm.healthCheck(),
+    llm.checkChatAvailability(),
     s3.healthCheck(),
   ]);
+
+  // Jujur: /credits 200 bahkan saat total_credits=0. Probe chat aktual yang
+  // menentukan: kuota free-tier habis → degraded + llm=quota_exhausted.
+  const llmState = !llmAvail.available
+    ? llmAvail.quotaExhausted
+      ? "quota_exhausted"
+      : "unavailable"
+    : "available";
+  const allOk = crdbOk && llmAvail.available && s3Ok;
 
   return {
     statusCode: 200,
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      status: crdbOk && llmOk && s3Ok ? "ok" : "degraded",
+      status: allOk ? "ok" : "degraded",
       crdb: crdbOk ? "connected" : "disconnected",
-      llm: llmOk ? "available" : "unavailable",
+      llm: llmState,
       s3: s3Ok ? "available" : "unavailable",
       version: "0.1.0",
     }),

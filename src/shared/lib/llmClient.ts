@@ -70,6 +70,25 @@ export function isAbortError(err: unknown): boolean {
   );
 }
 
+/**
+ * Backend melaporkan kuota LLM backend habis (frame `llm.quota_exhausted`).
+ * Bukan kegagalan lokal: BYOK tidak bisa menolong, jadi fallback chain STOP di
+ * sini — tidak membakar API key user lalu tetap menampilkan pesan generik.
+ */
+export class QuotaExceededError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "QuotaExceededError";
+  }
+}
+
+export function isQuotaExceededError(err: unknown): boolean {
+  return (
+    err instanceof QuotaExceededError ||
+    (err as { name?: string } | null)?.name === "QuotaExceededError"
+  );
+}
+
 // ─────────────────────────────────────────────
 // CBT System Prompt
 // ─────────────────────────────────────────────
@@ -166,6 +185,10 @@ export async function callLLMWithFallback(
     return await callLLM({ providerId: "backend-proxy", messages, ...options }, onStream, signal);
   } catch (err) {
     if (isAbortError(err)) throw err;
+    // Kuota backend habis → berhenti. BYOK memakai key user sendiri yang TIDAK
+    // terpengaruh kuota backend, tetapi menjalankannya di sini hanya membuang
+    // kredit user lalu tetap menampilkan kegagalan — pesan kuota lebih jujur.
+    if (isQuotaExceededError(err)) throw err;
     console.warn("[LLM] Backend failed, trying BYOK:", err);
   }
 
@@ -318,13 +341,7 @@ async function parseBackendProxySSE(
             // and chatStore renders the correct error message. Never stream the
             // backend's generic text as a fake assistant reply.
             if (json?.error === true) {
-              const err = new Error(
-                typeof json.message === "string" && json.message
-                  ? json.message
-                  : "Backend proxy returned an error",
-              );
-              err.name = "BackendErrorFrame";
-              throw err;
+              throw backendErrorFrameError(json);
             }
             const delta = json.t ?? "";
             // Final event: {"t":"","injectedMemoryIds":[...],"recalledTitles":[...]} —
@@ -346,7 +363,11 @@ async function parseBackendProxySSE(
           } catch (err) {
             // Structured backend error frames must propagate (they fail the
             // turn); malformed SSE lines are still skipped.
-            if (err instanceof Error && err.name === "BackendErrorFrame") throw err;
+            if (
+              err instanceof Error &&
+              (err.name === "BackendErrorFrame" || err.name === "QuotaExceededError")
+            )
+              throw err;
             // Skip malformed SSE lines
           }
         }
@@ -366,11 +387,74 @@ async function parseBackendProxySSE(
 
   const text = await response.text();
   return {
-    content: text,
+    content: parseBackendSSEText(text, onStream),
     providerId: "backend-proxy",
     modelId: "gpt-4o-mini",
     latencyMs: Date.now() - started,
   };
+}
+
+/**
+ * Konversi frame error SSE backend ({error:true}) menjadi Error yang tepat:
+ * `llm.quota_exhausted` → QuotaExceededError (menghentikan fallback chain),
+ * frame error lain → BackendErrorFrame (fallback chain lanjut ke BYOK).
+ */
+function backendErrorFrameError(json: { code?: unknown; message?: unknown }): Error {
+  if (json.code === "llm.quota_exhausted") {
+    return new QuotaExceededError(
+      typeof json.message === "string" && json.message
+        ? json.message
+        : "Backend LLM quota exhausted",
+    );
+  }
+  const err = new Error(
+    typeof json.message === "string" && json.message
+      ? json.message
+      : "Backend proxy returned an error",
+  );
+  err.name = "BackendErrorFrame";
+  return err;
+}
+
+/** Parse teks SSE backend tanpa streaming (tanpa callback / konten sekali baca). */
+function parseBackendSSEText(text: string, onStream: LLMStreamCallback | undefined): string {
+  let fullContent = "";
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("data: ")) continue;
+    if (trimmed === "data: [DONE]") {
+      onStream?.({ delta: "", done: true });
+      continue;
+    }
+    try {
+      const json = JSON.parse(trimmed.slice(6));
+      if (json?.error === true) {
+        onStream?.({ delta: "", done: true });
+        throw backendErrorFrameError(json);
+      }
+      if (Array.isArray(json.injectedMemoryIds)) {
+        onStream?.({
+          delta: "",
+          done: false,
+          injectedMemoryIds: json.injectedMemoryIds as string[],
+          recalledTitles: Array.isArray(json.recalledTitles)
+            ? (json.recalledTitles as string[])
+            : undefined,
+        });
+      }
+      const delta = json.t ?? "";
+      if (delta) {
+        fullContent += delta;
+        onStream?.({ delta, done: false });
+      }
+    } catch (err) {
+      if (err instanceof Error && (err.name === "BackendErrorFrame" || err.name === "QuotaExceededError"))
+        throw err;
+      // Skip malformed SSE lines
+    }
+  }
+  onStream?.({ delta: "", done: true });
+  return fullContent;
 }
 
 // ─────────────────────────────────────────────

@@ -3,6 +3,7 @@ import {
   MEDIA_UPLOAD_HOST,
   MediaUploadProbeResult,
   combineBackendStatus,
+  llmDetailMessage,
   probeMediaUploadReachability,
 } from "./mediaUploadProbe";
 
@@ -77,5 +78,23 @@ describe("combineBackendStatus", () => {
       status: "degraded",
       detail: null,
     });
+  });
+});
+
+describe("llmDetailMessage", () => {
+  it("gives an actionable detail for backend LLM quota exhaustion", () => {
+    const detail = llmDetailMessage("quota_exhausted");
+    expect(detail).toMatch(/kuota harian/i);
+    expect(detail).toMatch(/Settings → LLM/);
+  });
+
+  it("gives a terse detail for a generic backend LLM outage", () => {
+    expect(llmDetailMessage("unavailable")).toMatch(/tidak tersedia/i);
+  });
+
+  it("returns null when the LLM is healthy or unknown", () => {
+    expect(llmDetailMessage("available")).toBeNull();
+    expect(llmDetailMessage(undefined)).toBeNull();
+    expect(llmDetailMessage(null)).toBeNull();
   });
 });

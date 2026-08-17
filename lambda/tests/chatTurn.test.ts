@@ -11,6 +11,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { context } from "@opentelemetry/api";
 import { getMemoryContext, handleChatTurn } from "../handlers/chatTurn";
+import { OpenRouterQuotaError } from "../lib/openrouter";
 
 function crdbMock(heuristicRows: any[] = [], vectorRows: any[] = [], keywordRows: any[] = []) {
   const queries: { sql: string; params?: unknown[] }[] = [];
@@ -160,5 +161,67 @@ describe("handleChatTurn — runtime failure path", () => {
     expect(res.body).toContain('"message":"Terjadi kendala teknis. Coba lagi dalam beberapa saat."');
     expect(res.body).not.toContain('"t":"Terjadi');
     expect(res.body).toContain("data: [DONE]");
+  });
+
+  it("emits llm.quota_exhausted frame when the LLM hits the free-tier daily quota", async () => {
+    const crdb: any = {
+      queryOne: vi.fn(async () => ({ user_id: "u1" })),
+      query: vi.fn(async () => []),
+      execute: vi.fn(async () => {}),
+    };
+    const event = {
+      httpMethod: "POST",
+      body: JSON.stringify({ v: 1, sessionId: "s1", userMessage: "halo" }),
+    } as any;
+
+    const llm = {
+      apiKey: "test",
+      generateEmbedding: vi.fn(async () => new Array(1024).fill(0)),
+      streamChat: vi.fn(async function* () {
+        throw new OpenRouterQuotaError(
+          "Rate limit exceeded: free-models-per-day",
+          { quotaExhausted: true },
+        );
+      }),
+      chat: vi.fn(),
+      healthCheck: vi.fn(),
+    } as any;
+
+    const res = await handleChatTurn(event, crdb, llm, "token", "dev", context.active());
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain('"error":true');
+    expect(res.body).toContain('"code":"llm.quota_exhausted"');
+    // Actionable: tell the user where to fix it (add credits / use own key).
+    expect(res.body).toContain("quota");
+    expect(res.body).not.toContain('"code":"chat_turn_failed"');
+  });
+
+  it("treats an unknown LLM error as chat_turn_failed (no quota leakage)", async () => {
+    const crdb: any = {
+      queryOne: vi.fn(async () => ({ user_id: "u1" })),
+      query: vi.fn(async () => []),
+      execute: vi.fn(async () => {}),
+    };
+    const event = {
+      httpMethod: "POST",
+      body: JSON.stringify({ v: 1, sessionId: "s1", userMessage: "halo" }),
+    } as any;
+
+    const llm = {
+      apiKey: "test",
+      generateEmbedding: vi.fn(async () => new Array(1024).fill(0)),
+      streamChat: vi.fn(async function* () {
+        throw new Error("OpenRouter chat: HTTP 500 — boom");
+      }),
+      chat: vi.fn(),
+      healthCheck: vi.fn(),
+    } as any;
+
+    const res = await handleChatTurn(event, crdb, llm, "token", "dev", context.active());
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain('"code":"chat_turn_failed"');
+    expect(res.body).not.toContain('"llm.quota_exhausted"');
   });
 });

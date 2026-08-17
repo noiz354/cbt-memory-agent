@@ -6,6 +6,7 @@
 > (commits `158cc2a`..`76328ed`, `docs/FRONTEND-INTEGRATION-AUDIT.md`),
 > **Error Standardization (ADR-008, §10)**, **Honest-mode LLM (BYOK/On-device, §11)**,
 > dan **CameraPip S3 CORS + badge jujur (§12)**.
+> **LLM kuota OpenRouter + badge jujur (§13)**.
 > Update: 2026-08-18. Backend: Lambda Function URL (`CBT Memory Agent`),
 > DB: CockroachDB Cloud `woozy-grivet` (v26.2.5).
 
@@ -416,3 +417,49 @@ Harapan: `connect-src 'self' blob: https://cbt-memory-exports.s3.ap-southeast-3.
 | C3 | "Snapshot indexed" di dev & prod (1) (2) | §12.3 | ☐ |
 | C4 | Badge turun "Backend degraded" saat CORS dihapus | §12.3.3 | ☐ |
 | C5 | Node attachment tampil di vault + recall | §12.3.4 | ☐ |
+
+## 13. LLM fallback all-fails — kuota OpenRouter + badge jujur
+
+Konteks: `429 free-models-per-day` OpenRouter terdeteksi deterministik (`OpenRouterQuotaError` / `llm.quota_exhausted`), fallback chain berhenti (BYOK tidak dibakar), badge jujur atas status LLM backend.
+
+### 13.1 Verifikasi simulasi kuota (tanpa menunggu kuota habis)
+
+```bash
+# 1. Cek health — LLM harus "available" (quota belum habis / sudah ditop-up)
+curl -s https://d2sbinyjz34sz4.cloudfront.net/api/v1/health | jq .
+
+# 2. Simulasi frame kuota backend manual (langsung ke API, pakai token dev)
+#    Harus muncul `code:"llm.quota_exhausted"` dengan pesan actionable,
+#    BUKAN `chat_turn_failed` generik.
+curl -sN -X POST $BACKEND_URL/api/v1/chat/turn \
+  -H "Authorization: Bearer $DEV_TOKEN" -H "X-Device-Id: dev-1" \
+  -H "Content-Type: application/json" \
+  -d '{"v":1,"sessionId":"t","userMessage":"hai","memoryIds":[],"clientTs":"2026-08-18T00:00:00.000Z","deviceOnly":true}' \
+  | head -20
+```
+
+Jika kuota benar-benar habis, chat di UI menunjukkan pesan: *"Kuota harian model gratis backend habis. Tambah credit akun OpenRouter atau pasang API key sendiri (Settings → LLM)."* dan BYOK user TIDAK terpanggil (cek `getApiKey` di DevTools/`[LLM]` log: tidak ada "trying BYOK").
+
+### 13.2 Verifikasi badge jujur atas LLM backend
+
+1. Buka prod, pill pojok kanan bawah harus **Backend ok** saat LLM sehat.
+2. Saat kuota habis (atau bila diinginkan, set `llm.checkChatAvailability()` gagal): pill **Backend degraded** + tooltip "Backend LLM kehabisan kuota harian — tambah credit OpenRouter atau pasang API key sendiri (Settings → LLM)."
+3. Setelah top-up credit: poll 60 detik → pill kembali **Backend ok** tanpa reload.
+
+### 13.3 Verifikasi fallback chain tetap utuh (regresi)
+
+1. On-device gagal (hapus WebGPU) + backend sehat → chat tetap jalan via backend (bukan pesan error).
+2. Backend kirim frame `chat_turn_failed` (bukan kuota) → fallback lanjut ke BYOK (tidak berhenti).
+
+### Checklist kuota LLM
+
+| # | Verifikasi | Command ref | Pass/Fail |
+|---|---|---|---|
+| Q1 | Health `llm: "available"` saat kuota sehat | §13.1 (1) | ☐ |
+| Q2 | Kirim chat normal — tidak ada pesan error kuota | manual | ☐ |
+| Q3 | Simulasi frame kuota → `llm.quota_exhausted` + pesan actionable | §13.1 (2) | ☐ |
+| Q4 | UI saat kuota habis: pesan kuota spesifik, BUKAN "All providers failed" | §13.1 | ☐ |
+| Q5 | BYOK tidak terbakar saat kuota backend habis | §13.1 (log) | ☐ |
+| Q6 | Badge degraded + tooltip kuota saat `checkChatAvailability` gagal | §13.2 | ☐ |
+| Q7 | Badge pulih "ok" setelah top-up credit | §13.2 (3) | ☐ |
+| Q8 | Fallback backend tetap jalan saat on-device gagal (regresi) | §13.3 (1) | ☐ |

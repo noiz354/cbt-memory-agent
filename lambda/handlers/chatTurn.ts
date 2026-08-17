@@ -19,6 +19,10 @@ import { logger } from "../lib/logger";
 import { reciprocalRankFusion } from "../lib/retrieval";
 import { toVectorLiteral } from "../lib/vectors";
 import { reportError, ERROR_CODES } from "../lib/errors";
+import { isOpenRouterQuotaError } from "../lib/openrouter";
+
+const QUOTA_EXHAUSTED_MESSAGE =
+  "Kuota harian model gratis OpenRouter habis. Tambah credit akun OpenRouter atau gunakan API key sendiri (Settings → LLM).";
 
 const chatTurnSchema = z.object({
   v: z.literal(1),
@@ -190,6 +194,23 @@ export async function handleChatTurn(
     };
   } catch (err) {
     reportError(err, { route: normalizeRoute("/api/v1/chat/turn") });
+    // Kuota free-tier habis ≠ error sementara: beri frame khusus supaya frontend
+    // tidak membakar sisa fallback (BYOK) dan menampilkan pesan yang bisa ditindak.
+    if (isOpenRouterQuotaError(err)) {
+      return {
+        statusCode: 200,
+        headers: cors,
+        body:
+          "data: " +
+          JSON.stringify({
+            error: true,
+            code: "llm.quota_exhausted",
+            retriable: false,
+            message: QUOTA_EXHAUSTED_MESSAGE,
+          }) +
+          "\n\ndata: [DONE]\n\n",
+      };
+    }
     const chatErr = ERROR_CODES["chat.turn_failed"];
     return {
       statusCode: 200,

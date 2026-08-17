@@ -416,3 +416,18 @@ Standardisasi penanganan error full-stack: satu taxonomy + envelope + choke poin
 - [x] **Toast spesifik** (`src/shared/lib/apiClient.ts` `uploadMediaToS3`) — kegagalan fetch PUT → `media.upload_failed` dengan pesan menyebut langkah media upload + CORS bucket S3 (bukan generic). TDD 2 test.
 - [x] **Verifikasi** — typecheck ✓, frontend test **103/103**, lambda test **157/157**, build ✓, `terraform validate` ✓, `terraform plan` 1 add + 3 change (drif tak terkait: bucket policy OAC & hash zip — di-`-target`-skip agar tidak menyentuh prod lain).
 - [ ] **Opsional** — verifikasi manusia manual di UI (localhost + CloudFront) setelah deploy; monitor `media.upload_failed` di Mimir/CloudWatch.
+
+## LLM fallback all-fails — root cause kuota OpenRouter + badge jujur (2026-08-18)
+
+**Gejala** (prod CloudFront): bubble chat menampilkan "*— LLM unavailable. All providers failed…*" meski badge "Backend ok" — dan BYOK user ikut terbakar percuma.
+
+**Akar masalah**: akun OpenRouter free-tier **kehabisan kuota** (`429 free-models-per-day — Add 10 credits`; terkonfirmasi via CloudWatch `cbt-memory-agent` + API `/credits` = 0 + `/key` = is_free_tier). Setiap `/chat/turn` memakai 2 request (embedding + chat), refleksi ~6 jam juga ikut memakai. Badge "ok" karena `healthCheck()` hanya GET `/credits` (ok meski 0); pesan generik karena `chatTurn.ts` membungkus SEMUA error jadi `chat_turn_failed`; fallback chain meneruskan ke BYOK (sia-sia, kredit user terpakai) lalu fallback generik.
+
+- [x] **Deterministik kuota** (`lambda/lib/openrouter.ts`) — `classifyChatError` mendeteksi 429/402 dengan hint "free-models-per-day/insufficient credits/add 10 credits" → `OpenRouterQuotaError`; `checkChatAvailability()` probe `chat/completions` (cache 10m) menggantikan GET /credits. TDD 9 test.
+- [x] **Frame SSE khusus** (`lambda/handlers/chatTurn.ts`) — error kuota → `{error:true, code:"llm.quota_exhausted", message:"Kuota harian model gratis OpenRouter habis. Tambah credit akun OpenRouter atau gunakan API key sendiri (Settings → LLM)."}` (bukan `chat_turn_failed`). TDD 2 test.
+- [x] **Health LLM jujur** (`lambda/handlers/health.ts`) — `llm: "quota_exhausted"|"unavailable"|"available"` dari `checkChatAvailability`. TDD 4 test.
+- [x] **Fallback chain berhenti saat kuota** (`src/shared/lib/llmClient.ts`) — frame `llm.quota_exhausted` → `QuotaExceededError`; `callLLMWithFallback` STOP (BYOK tidak dijalankan, kredit user tidak dibakar); parser SSE non-streaming + catch "malformed" ikut di-fix agar error frame selalu lolos. TDD 3 test.
+- [x] **Pesan bubble spesifik** (`src/features/chat/lib/chatError.ts` baru) — `assistantErrorMessage`: kuota → pesan actionable (tambah credit / Settings → LLM), rate limit → pesan rate limit, selainnya → generik. TDD 4 test.
+- [x] **Badge jujur (LLM)** (`src/shared/lib/mediaUploadProbe.ts` `llmDetailMessage` + `OfflineBanner.tsx`) — saat backend lapor `quota_exhausted` badge **Backend degraded** + tooltip actionable. TDD 4 test.
+- [x] **Verifikasi** — typecheck ✓, frontend test **114/114**, lambda test **172/172**, build ✓.
+- [ ] **Opsional** — tambah $10 credit OpenRouter (di luar kode); verifikasi UI manual (badge pulih "ok", chat jalan, tooltip kuota hilang); monitor `llm.quota_exhausted` di CloudWatch/Mimir.

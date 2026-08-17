@@ -1,10 +1,20 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const auth = vi.hoisted(() => ({ getAuthHeaders: vi.fn() }));
+const byok = vi.hoisted(() => ({ getApiKey: vi.fn() }));
+const onDevice = vi.hoisted(() => ({ generateOnDevice: vi.fn() }));
 
 vi.mock("@/shared/lib/authSession", () => ({ getAuthHeaders: auth.getAuthHeaders }));
+vi.mock("@/shared/lib/byokKeyManager", () => ({ getApiKey: byok.getApiKey }));
+vi.mock("@/shared/lib/onDeviceLLM", () => ({ generateOnDevice: onDevice.generateOnDevice }));
 
-import { callLLM, isAbortError, type LLMStreamChunk } from "@/shared/lib/llmClient";
+import {
+  callLLM,
+  callLLMWithFallback,
+  isAbortError,
+  isQuotaExceededError,
+  type LLMStreamChunk,
+} from "@/shared/lib/llmClient";
 
 function sseResponse(body: string, status = 200): Response {
   const stream = new ReadableStream<Uint8Array>({
@@ -153,6 +163,48 @@ describe("callLLM backend-proxy SSE", () => {
     // The error text must NOT be emitted as streamed content — otherwise it
     // would render as a fake assistant reply and bypass the LLM fallback chain.
     expect(chunks.filter((c) => !c.done).length).toBe(0);
+  });
+
+  it("throws a QuotaExceededError on an llm.quota_exhausted frame, never streaming it as content", async () => {
+    const sse =
+      'data: {"error":true,"code":"llm.quota_exhausted","retriable":false,"message":"Kuota harian model gratis OpenRouter habis. Tambah credit akun OpenRouter atau gunakan API key sendiri (Settings → LLM)."}\n\n' +
+      "data: [DONE]\n\n";
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(sseResponse(sse)));
+
+    const chunks: LLMStreamChunk[] = [];
+    await expect(
+      callLLM(
+        { providerId: "backend-proxy", messages: [{ role: "user", content: "hi" }] },
+        (chunk) => chunks.push(chunk),
+      ),
+    ).rejects.toMatchObject({ name: "QuotaExceededError" });
+
+    expect(chunks.filter((c) => !c.done).length).toBe(0);
+  });
+
+  it("callLLMWithFallback stops at the backend quota frame and does NOT burn the user's BYOK key", async () => {
+    onDevice.generateOnDevice.mockRejectedValue(new Error("WebGPU unavailable"));
+    const sse =
+      'data: {"error":true,"code":"llm.quota_exhausted","retriable":false,"message":"Kuota harian model gratis OpenRouter habis."}\n\n' +
+      "data: [DONE]\n\n";
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(sseResponse(sse)));
+
+    await expect(callLLMWithFallback([{ role: "user", content: "hi" }])).rejects.toMatchObject({
+      name: "QuotaExceededError",
+    });
+    // BYOK must not be attempted — there is nothing a personal key can do when
+    // the BACKEND's shared quota is exhausted; falling through would burn the
+    // user's key needlessly and then still show a generic failure.
+    expect(byok.getApiKey).not.toHaveBeenCalled();
+  });
+
+  it("isQuotaExceededError recognizes QuotaExceededError instances and name-matches", () => {
+    const quota = new Error("quota");
+    quota.name = "QuotaExceededError";
+    expect(isQuotaExceededError(quota)).toBe(true);
+    expect(isQuotaExceededError(new Error("boom"))).toBe(false);
   });
 
   it("aborts cleanly when the signal is aborted before the stream resolves", async () => {

@@ -25,6 +25,53 @@ export const CHAT_MODEL = "openrouter/free";
 export const EMBED_MODEL = "baai/bge-m3";
 export const EMBED_DIM = 1024;
 
+/**
+ * Kuota model gratis OpenRouter habis (HTTP 429 "free-models-per-day" /
+ * HTTP 402 "insufficient credits"). Bukan rate-limit sementara — retry tidak
+ * menolong sampai kuota reset (harian) atau credit ditambahkan. Dipakai
+ * chatTurn untuk frame SSE llm.quota_exhausted dan health untuk badge jujur.
+ */
+export class OpenRouterQuotaError extends Error {
+  readonly quotaExhausted: boolean;
+
+  constructor(message: string, opts: { quotaExhausted: boolean }) {
+    super(message);
+    this.name = "OpenRouterQuotaError";
+    this.quotaExhausted = opts.quotaExhausted;
+  }
+}
+
+export function isOpenRouterQuotaError(err: unknown): err is OpenRouterQuotaError {
+  return err instanceof OpenRouterQuotaError || (err as { name?: string })?.name === "OpenRouterQuotaError";
+}
+
+/** Hasil probe ketersediaan chat + kuota (health badge). */
+export interface ChatAvailability {
+  available: boolean;
+  quotaExhausted: boolean;
+}
+
+const FREE_QUOTA_HINTS = [
+  "free-models-per-day",
+  "free models per day",
+  "insufficient credits",
+  "add 10 credits",
+];
+
+/** Klasifikasi error OpenRouter: kuota habis vs rate-limit sementara vs upstream. */
+function classifyChatError(status: number, bodyText: string): Error {
+  if (status === 429 || status === 402) {
+    const lower = bodyText.toLowerCase();
+    if (FREE_QUOTA_HINTS.some((hint) => lower.includes(hint))) {
+      return new OpenRouterQuotaError(
+        `OpenRouter quota exhausted (HTTP ${status}): ${bodyText.slice(0, 200)}`,
+        { quotaExhausted: true },
+      );
+    }
+  }
+  return new Error(`OpenRouter chat: HTTP ${status} — ${bodyText.slice(0, 200)}`);
+}
+
 interface ChatMessage {
   role: "system" | "user" | "assistant";
   content: string;
@@ -125,7 +172,7 @@ export class OpenRouterClient {
 
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      throw new Error(`OpenRouter chat: HTTP ${res.status} — ${text.slice(0, 200)}`);
+      throw classifyChatError(res.status, text);
     }
 
     const reader = res.body?.getReader();
@@ -208,7 +255,7 @@ export class OpenRouterClient {
 
         if (!resp.ok) {
           const text = await resp.text().catch(() => "");
-          throw new Error(`OpenRouter chat: HTTP ${resp.status} — ${text.slice(0, 200)}`);
+          throw classifyChatError(resp.status, text);
         }
 
         const data = (await resp.json()) as {
@@ -238,5 +285,60 @@ export class OpenRouterClient {
     } catch {
       return false;
     }
+  }
+
+  // ── Chat availability (kuota) — badge jujur ──────────────────────────
+  // /credits mengembalikan 200 bahkan saat total_credits=0 (bug-3: badge
+  // "Backend ok" padahal chat 429 free-models-per-day). Probe chat 1-token
+  // memberi sinyal kuota yang sebenarnya. Hasil di-cache agar health poll
+  // 60s tidak membakar kuota itu sendiri (1 probe / interval, bukan tiap poll).
+
+  /** Cached probe outcome — module-level, scoped per Lambda container. */
+  private availabilityCache: ChatAvailability | null = null;
+  private availabilityCheckedAt = 0;
+
+  private static readonly AVAILABILITY_CACHE_MS = 10 * 60 * 1000; // 10 menit
+
+  async checkChatAvailability(): Promise<ChatAvailability> {
+    const now = Date.now();
+    if (
+      this.availabilityCache &&
+      now - this.availabilityCheckedAt < OpenRouterClient.AVAILABILITY_CACHE_MS
+    ) {
+      return this.availabilityCache;
+    }
+
+    let result: ChatAvailability;
+    try {
+      const resp = await fetch(`${BASE_URL}/chat/completions`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this.apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: CHAT_MODEL,
+          messages: [{ role: "user", content: "ping" }],
+          max_tokens: 1,
+          stream: false,
+        }),
+      });
+      if (resp.ok) {
+        result = { available: true, quotaExhausted: false };
+      } else {
+        const text = await resp.text().catch(() => "");
+        if (isOpenRouterQuotaError(classifyChatError(resp.status, text))) {
+          result = { available: false, quotaExhausted: true };
+        } else {
+          result = { available: false, quotaExhausted: false };
+        }
+      }
+    } catch {
+      result = { available: false, quotaExhausted: false };
+    }
+
+    this.availabilityCache = result;
+    this.availabilityCheckedAt = now;
+    return result;
   }
 }

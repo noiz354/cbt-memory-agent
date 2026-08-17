@@ -1,6 +1,7 @@
 import { apiClient, type HealthResponse } from "@/shared/lib/apiClient";
 import {
   combineBackendStatus,
+  llmDetailMessage,
   probeMediaUploadReachability,
 } from "@/shared/lib/mediaUploadProbe";
 import { cn } from "@/shared/lib/cn";
@@ -26,7 +27,12 @@ async function probe(): Promise<BackendState> {
     probeMediaUploadReachability(),
   ]);
   const combined = combineBackendStatus(health.status, media);
-  return { status: combined.status, details: health.details, detail: combined.detail };
+  const llmDetail = health.details ? llmDetailMessage(health.details.llm) : null;
+  return {
+    status: combined.status,
+    details: health.details,
+    detail: combined.detail ?? llmDetail,
+  };
 }
 
 /**
