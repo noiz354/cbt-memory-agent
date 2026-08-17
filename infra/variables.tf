@@ -110,6 +110,12 @@ variable "allowed_origin" {
   default     = "*"
 }
 
+variable "s3_cors_allowed_origins" {
+  description = "Origins yang diizinkan PUT/GET langsung ke bucket media dari browser (S3 CORS). Dev Vite = http://localhost:5173; prod = app_url/CloudFront."
+  type        = list(string)
+  default     = ["http://localhost:5173"]
+}
+
 variable "aws_account_id" {
   description = "AWS account ID (12 digits)"
   type        = string

@@ -116,7 +116,7 @@ resource "aws_cloudfront_response_headers_policy" "spa" {
 
   security_headers_config {
     content_security_policy {
-      content_security_policy = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; worker-src 'self' blob:; connect-src 'self' blob:; font-src 'self'; base-uri 'self'; form-action 'self';"
+      content_security_policy = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; worker-src 'self' blob:; connect-src 'self' blob: https://cbt-memory-exports.s3.ap-southeast-3.amazonaws.com; font-src 'self'; base-uri 'self'; form-action 'self';"
       override                = true
     }
 

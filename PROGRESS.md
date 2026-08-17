@@ -403,3 +403,16 @@ Standardisasi penanganan error full-stack: satu taxonomy + envelope + choke poin
 - [x] **Honest-mode UI** (`src/features/privacy/components/LlmPanel.tsx`) — saat hosted: banner amber penjelasan CSP + provider aktif backend-proxy; tombol **Preload**, **Save key**, **Test** dinonaktifkan; label on-device → "Unavailable in hosted deployment"; visual fallback-chain menandai on-device & BYOK strikethrough + backend "active". Fitur tetap utuh bagi self-host/Vite dev (localhost).
 - [x] **Verifikasi** — `npm run typecheck` ✓, `npm test` **92/92** ✓, `npm run build` ✓ (hanya warning chunk-size yang sudah ada).
 - [ ] **Keputusan tersimpan opsional** — untuk mengaktifkan on-device/BYOK di prod, perlu perlonggar CSP / self-host model weights / proxy BYOK server-side (ADR-008 lanjutan, bukan bagian perubahan ini).
+
+## CameraPip "Analyze & save" — root cause S3 CORS + CSP (2026-08-18)
+
+**Gejala**: toast "Index failed: Tidak dapat terhubung ke server. Periksa koneksi (CORS/CSP dapat memblokir)" meski badge "Backend ok".
+
+**Akar masalah**: `indexAttachment` (`src/features/chat/lib/attachmentIndex.ts`) melakukan presign → **PUT langsung ke S3** (cross-origin) → create. PUT cross-origin selalu preflight OPTIONS; bucket `cbt-memory-exports` **tidak punya konfigurasi CORS** → browser blokir → `TypeError: Failed to fetch` → `classifyFetchError` → `network.unreachable`. Badge "Backend ok" hanya probe `/health` (server-side dalam Lambda) → tidak pernah menguji jalur CORS browser → bukan kontradiksi, beda lapis.
+
+- [x] **S3 CORS** (`infra/modules/lambda/main.tf`) — `aws_s3_bucket_cors_configuration.exports`: origins `http://localhost:5173` + `https://d2sbinyjz34sz4.cloudfront.net` (var `s3_cors_allowed_origins`), methods PUT/GET/HEAD/DELETE, headers content-type/authorization/x-device-id, expose etag, max-age 600. **Applied live** — preflight verifikasi `Access-Control-Allow-Origin: http://localhost:5173` ✓.
+- [x] **CSP prod** (`infra/modules/frontend/main.tf:119` + `nginx.conf:49`) — `connect-src` + `https://cbt-memory-exports.s3.ap-southeast-3.amazonaws.com`. **Applied live** — header CloudFront terverifikasi ✓.
+- [x] **Badge jujur** (`src/shared/lib/mediaUploadProbe.ts` baru + `OfflineBanner.tsx`) — probe `GET` cross-origin ke host S3 tiap poll (CORS ok bila resolve meski 403); saat diblokir → badge **Backend degraded** + tooltip "Media upload diblokir di browser (CORS/CSP/network)". TDD 9 test.
+- [x] **Toast spesifik** (`src/shared/lib/apiClient.ts` `uploadMediaToS3`) — kegagalan fetch PUT → `media.upload_failed` dengan pesan menyebut langkah media upload + CORS bucket S3 (bukan generic). TDD 2 test.
+- [x] **Verifikasi** — typecheck ✓, frontend test **103/103**, lambda test **157/157**, build ✓, `terraform validate` ✓, `terraform plan` 1 add + 3 change (drif tak terkait: bucket policy OAC & hash zip — di-`-target`-skip agar tidak menyentuh prod lain).
+- [ ] **Opsional** — verifikasi manusia manual di UI (localhost + CloudFront) setelah deploy; monitor `media.upload_failed` di Mimir/CloudWatch.

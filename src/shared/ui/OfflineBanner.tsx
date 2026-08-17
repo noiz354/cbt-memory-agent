@@ -1,4 +1,8 @@
 import { apiClient, type HealthResponse } from "@/shared/lib/apiClient";
+import {
+  combineBackendStatus,
+  probeMediaUploadReachability,
+} from "@/shared/lib/mediaUploadProbe";
 import { cn } from "@/shared/lib/cn";
 import { useEffect, useState } from "react";
 
@@ -7,17 +11,22 @@ type BackendStatus = "ok" | "degraded" | "down" | "unknown";
 interface BackendState {
   status: BackendStatus;
   details: HealthResponse | null;
+  detail: string | null;
 }
 
 const POLL_MS = 60_000;
 
 async function probe(): Promise<BackendState> {
-  try {
-    const details = await apiClient.health();
-    return { status: details.status, details };
-  } catch {
-    return { status: "down", details: null };
-  }
+  const [health, media] = await Promise.all([
+    apiClient
+      .health()
+      .then((details) => ({ details, status: details.status }))
+      .catch(() => ({ details: null, status: "down" as const })),
+    // Jalur upload S3 dari browser — /health tidak pernah menguji ini (server-side).
+    probeMediaUploadReachability(),
+  ]);
+  const combined = combineBackendStatus(health.status, media);
+  return { status: combined.status, details: health.details, detail: combined.detail };
 }
 
 /**
@@ -27,7 +36,7 @@ async function probe(): Promise<BackendState> {
  */
 export function OfflineBanner() {
   const [offline, setOffline] = useState(() => (typeof navigator === "undefined" ? false : !navigator.onLine));
-  const [backend, setBackend] = useState<BackendState>({ status: "unknown", details: null });
+  const [backend, setBackend] = useState<BackendState>({ status: "unknown", details: null, detail: null });
 
   useEffect(() => {
     const on = () => setOffline(false);
@@ -84,7 +93,7 @@ export function OfflineBanner() {
           <button
             type="button"
             onClick={() => void (async () => setBackend(await probe()))()}
-            title={backend.details ? `CRDB ${backend.details.crdb} · LLM ${backend.details.llm} · S3 ${backend.details.s3}` : "Backend status"}
+            title={backend.detail ?? (backend.details ? `CRDB ${backend.details.crdb} · LLM ${backend.details.llm} · S3 ${backend.details.s3}` : "Backend status")}
             className={cn(
               "pointer-events-auto rounded-full px-3 py-1 text-[11px] font-semibold shadow-[var(--shadow-float)] transition-colors",
               pillColor,

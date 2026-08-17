@@ -93,6 +93,21 @@ resource "aws_s3_bucket_ownership_controls" "exports" {
   }
 }
 
+# CORS bucket media — wajib agar browser bisa PUT langsung ke S3 (presigned URL)
+# dari aplikasi. Tanpa ini, preflight OPTIONS gagal → 'Failed to fetch' di
+# CameraPip "Analyze & save" meski badge /health bilang "Backend ok".
+resource "aws_s3_bucket_cors_configuration" "exports" {
+  bucket = aws_s3_bucket.exports.id
+
+  cors_rule {
+    allowed_origins = var.s3_cors_allowed_origins
+    allowed_methods = ["PUT", "GET", "HEAD", "DELETE"]
+    allowed_headers = ["content-type", "authorization", "x-device-id"]
+    expose_headers  = ["etag"]
+    max_age_seconds = 600
+  }
+}
+
 # Lambda Function URL (cheaper than API Gateway — 71% savings)
 resource "aws_lambda_function_url" "this" {
   function_name      = aws_lambda_function.this.function_name

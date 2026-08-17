@@ -103,3 +103,33 @@ describe("apiClient 429 rate limiting", () => {
     expect(parseRetryAfterMs("abc")).toBeNull();
   });
 });
+
+describe("apiClient uploadMediaToS3 CORS/network diagnostics", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("maps a browser CORS/CSP/network TypeError to media.upload_failed with a diagnosable message", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+
+    const err = await apiClient.uploadMediaToS3("https://s3.example/put", new Blob(["x"]), "image/jpeg").then(
+      () => null,
+      (e: unknown) => e as { name?: string; code?: string; retriable?: boolean; message?: string },
+    );
+    expect(err).not.toBeNull();
+    expect(err?.name).toBe("ApiError");
+    expect(err?.code).toBe("media.upload_failed");
+    expect(err?.retriable).toBe(true);
+    expect(err?.message).toContain("CORS");
+  });
+
+  it("still surfaces HTTP rejection statuses as media.upload_failed", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 403 })));
+
+    const err = await apiClient
+      .uploadMediaToS3("https://s3.example/put", new Blob(["x"]))
+      .then(() => null, (e: Error & { code?: string; httpStatus?: number }) => e);
+    expect(err?.code).toBe("media.upload_failed");
+    expect(err?.httpStatus).toBe(403);
+  });
+});

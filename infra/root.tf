@@ -30,16 +30,17 @@ module "iam" {
 module "lambda" {
   source = "./modules/lambda"
 
-  function_name  = var.function_name
-  role_arn       = module.iam.lambda_role_arn
-  environment    = var.environment
-  aws_region     = var.aws_region
-  s3_bucket      = var.s3_bucket
-  allowed_origin = var.allowed_origin
-  email_from     = var.email_from
-  app_url        = var.app_url
-  memory_size    = var.memory_size
-  timeout        = var.timeout
+  function_name           = var.function_name
+  role_arn                = module.iam.lambda_role_arn
+  environment             = var.environment
+  aws_region              = var.aws_region
+  s3_bucket               = var.s3_bucket
+  allowed_origin          = var.allowed_origin
+  s3_cors_allowed_origins = var.s3_cors_allowed_origins
+  email_from              = var.email_from
+  app_url                 = var.app_url
+  memory_size             = var.memory_size
+  timeout                 = var.timeout
 
   depends_on = [module.iam, module.ssm]
 }

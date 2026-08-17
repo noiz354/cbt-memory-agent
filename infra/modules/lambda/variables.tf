@@ -33,6 +33,12 @@ variable "allowed_origin" {
   default     = "*"
 }
 
+variable "s3_cors_allowed_origins" {
+  description = "Origins yang diizinkan akses langsung ke bucket media dari browser (S3 CORS): PUT/GET/HEAD/DELETE."
+  type        = list(string)
+  default     = ["http://localhost:5173"]
+}
+
 variable "memory_size" {
   description = "Lambda memory in MB"
   type        = number

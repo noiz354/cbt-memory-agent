@@ -577,8 +577,13 @@ export const apiClient = {
         body: blob,
       });
     } catch (err) {
-      // 'Failed to fetch' (CORS/CSP/network) vs pembatalan — jadikan diagnosable.
-      throw classifyFetchError(err);
+      // PUT langsung ke S3 selalu preflight cross-origin; TypeError 'Failed to fetch'
+      // = CORS bucket/CSP/network memblokir — beri pesan diagnosable yang menyebut
+      // langkah media upload (bukan sekadar "Tidak dapat terhubung ke server").
+      const classified = classifyFetchError(err);
+      throw new ApiError(ERROR_CODES.media_upload_failed,
+        "Media upload diblokir di browser (CORS/CSP/network). Periksa CORS bucket S3 atau sambungan jaringan.",
+        { retriable: true, httpStatus: classified.httpStatus, original: err });
     }
     if (!res.ok) {
       throw new ApiError(ERROR_CODES.media_upload_failed, `S3 upload ${res.status}: ${res.statusText}`, {

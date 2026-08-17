@@ -4,7 +4,8 @@
 > Emotional Media Attachments, Reflection Loop (MCP + cluster health gate + skills),
 > recall hybrid RRF, **11 perbaikan gap audit integrasi frontend-backend**
 > (commits `158cc2a`..`76328ed`, `docs/FRONTEND-INTEGRATION-AUDIT.md`),
-> **Error Standardization (ADR-008, §10)**, dan **Honest-mode LLM (BYOK/On-device, §11)**.
+> **Error Standardization (ADR-008, §10)**, **Honest-mode LLM (BYOK/On-device, §11)**,
+> dan **CameraPip S3 CORS + badge jujur (§12)**.
 > Update: 2026-08-18. Backend: Lambda Function URL (`CBT Memory Agent`),
 > DB: CockroachDB Cloud `woozy-grivet` (v26.2.5).
 
@@ -377,3 +378,41 @@ Harapan: log JSON berisi `level:"error"`, `event:<code>`, `code:<code>`, `catego
 | L2 | Fallback-chain strikethrough + "backend active" di prod | §11.1.3 | ☐ |
 | L3 | Preload/Save/Test disabled di prod | §11.1.4 | ☐ |
 | L4 | Tidak ada banner di localhost (fitur On-device/BYOK utuh) | §11.2.2 | ☐ |
+
+---
+
+## 12. CameraPip "Analyze & save" — S3 CORS + Badge jujur
+
+> **Fakta**: `indexAttachment` mengirim raw media **langsung ke S3** (`cbt-memory-exports`) lewat presigned PUT — cross-origin. Tanpa CORS bucket, browser memblokir preflight → "Index failed: ... (CORS/CSP)". Badge "Backend ok" hanya cek `/health` (server-side) sehingga tak mendeteksinya; kini badge juga probe jalur upload S3 dari browser.
+
+### 12.1 Verifikasi preflight S3 (curl, tanpa auth)
+
+```bash
+curl -s -i -X OPTIONS "https://cbt-memory-exports.s3.ap-southeast-3.amazonaws.com/media/probe" \
+  -H "Origin: http://localhost:5173" -H "Access-Control-Request-Method: PUT" -H "Access-Control-Request-Headers: content-type"
+```
+Harapan: `HTTP/1.1 200 OK` dengan `Access-Control-Allow-Origin: http://localhost:5173`, `Access-Control-Allow-Methods: GET, HEAD, DELETE, PUT`, `Access-Control-Allow-Headers: content-type`.
+
+### 12.2 Verifikasi CSP prod (CloudFront)
+
+```bash
+curl -s -I "https://d2sbinyjz34sz4.cloudfront.net/" | grep -i content-security-policy
+```
+Harapan: `connect-src 'self' blob: https://cbt-memory-exports.s3.ap-southeast-3.amazonaws.com`.
+
+### 12.3 Verifikasi UI
+
+1. Dev: `npm run dev` → kamera → **Analyze & save** → toast hijau "Snapshot indexed" (bukan "Index failed").
+2. Prod (CloudFront): sama → toast hijau; map/network tab shows PUT 200 ke host S3.
+3. Simulasi blok (opsional): nonaktifkan CORS bucket secara manual → badge turun ke **Backend degraded** + tooltip CORS dalam ≤60s polling.
+4. Recall: node attachment muncul di vault/meson Memori (`kind: attachment`, title `Camera · {expr} {conf}% · {time}`).
+
+### Checklist CameraPip upload
+
+| # | Verifikasi | Command ref | Pass/Fail |
+|---|---|---|---|
+| C1 | Preflight S3 200 + Allow-Origin (dev origin) | §12.1 | ☐ |
+| C2 | CSP prod sertakan host S3 di connect-src | §12.2 | ☐ |
+| C3 | "Snapshot indexed" di dev & prod (1) (2) | §12.3 | ☐ |
+| C4 | Badge turun "Backend degraded" saat CORS dihapus | §12.3.3 | ☐ |
+| C5 | Node attachment tampil di vault + recall | §12.3.4 | ☐ |
