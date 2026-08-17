@@ -8,6 +8,7 @@
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
 import { CrdbClient } from "../lib/crdb";
 import { S3ClientService } from "../lib/s3";
+import { AppError, errorEnvelope, reportError } from "../lib/errors";
 
 export async function handleExport(
   _event: APIGatewayProxyEvent,
@@ -21,7 +22,7 @@ export async function handleExport(
       return {
         statusCode: 501,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ v: 2, ok: false, error: "S3 export bucket is not configured." }),
+        body: JSON.stringify(errorEnvelope(new AppError("resource.misconfigured", { message: "S3 export bucket is not configured." }))),
       };
     }
 
@@ -86,14 +87,11 @@ export async function handleExport(
       }),
     };
   } catch (err) {
+    const appErr = reportError(new AppError("export.failed", { cause: err }));
     return {
-      statusCode: 500,
+      statusCode: appErr.statusCode,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        v: 2,
-        ok: false,
-        error: err instanceof Error ? err.message : "Export failed",
-      }),
+      body: JSON.stringify({ v: 2, ok: false, ...errorEnvelope(appErr) }),
     };
   }
 }

@@ -13,7 +13,7 @@
  */
 
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
-import { SpanStatusCode, Context } from "@opentelemetry/api";
+import { Context } from "@opentelemetry/api";
 import {
   ATTR_HTTP_REQUEST_METHOD,
   ATTR_HTTP_ROUTE,
@@ -32,6 +32,7 @@ import {
   startSpan,
 } from "./lib/telemetry";
 import { logger } from "./lib/logger";
+import { errorEnvelope, reportError, AppError } from "./lib/errors";
 import { handleChatTurn } from "./handlers/chatTurn";
 import { handleListMemory, handleUpsertMemory, handleDeleteMemory, handleDeleteMemoryEdge } from "./handlers/memory";
 import { handleSemanticSearch } from "./handlers/semanticSearch";
@@ -90,15 +91,11 @@ export async function handler(
         body: JSON.stringify(result),
       };
     } catch (err) {
-      logger.error("reflection.handler_failed", "Reflection handler error", {
-        err: err instanceof Error ? err.message : String(err),
-      });
-      rootSpan.recordException(err instanceof Error ? err : new Error(String(err)));
-      rootSpan.setStatus({ code: SpanStatusCode.ERROR });
+      const appErr = reportError(err, { span: rootSpan, route: "/reflect" });
       return {
-        statusCode: 500,
+        statusCode: appErr.statusCode,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ error: "Reflection failed" }),
+        body: JSON.stringify(errorEnvelope(appErr)),
       };
     } finally {
       rootSpan.end();
@@ -141,14 +138,12 @@ export async function handler(
 
     return finalizeResponse(result, rootSpan, startedAt, method, path);
   } catch (err) {
-    logger.error("api.unhandled", "Unhandled API error", { err: err instanceof Error ? err.message : String(err) });
-    rootSpan.recordException(err instanceof Error ? err : new Error(String(err)));
-    rootSpan.setStatus({ code: SpanStatusCode.ERROR });
+    const appErr = reportError(err, { span: rootSpan, route: normalizeRoute(path || "/") });
     return finalizeResponse(
       {
-        statusCode: 500,
+        statusCode: appErr.statusCode,
         headers: corsHeaders(),
-        body: JSON.stringify({ error: "Internal server error" }),
+        body: JSON.stringify(errorEnvelope(appErr)),
       },
       rootSpan,
       startedAt,
@@ -187,10 +182,13 @@ async function route(
   if (!isPublic) {
     const authResult = await validateAuth(token, deviceId, crdb);
     if (!authResult.valid) {
+      const appErr = new AppError("auth.invalid_token", {
+        message: authResult.error ?? "Unauthorized",
+      });
       return {
         statusCode: authResult.statusCode ?? 401,
         headers: corsHeaders(),
-        body: JSON.stringify({ error: authResult.error }),
+        body: JSON.stringify(errorEnvelope(appErr)),
       };
     }
   }
@@ -349,7 +347,7 @@ function notFound(): APIGatewayProxyResult {
   return {
     statusCode: 404,
     headers: corsHeaders(),
-    body: JSON.stringify({ error: "Not found" }),
+    body: JSON.stringify(errorEnvelope(new AppError("resource.not_found"))),
   };
 }
 

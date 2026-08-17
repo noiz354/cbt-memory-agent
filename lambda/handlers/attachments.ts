@@ -22,6 +22,7 @@ import { OpenRouterClient } from "../lib/openrouter";
 import { S3ClientService } from "../lib/s3";
 import { writeNodeEmbedding } from "../lib/vectorWriter";
 import { logger } from "../lib/logger";
+import { AppError, errorEnvelope, reportError } from "../lib/errors";
 
 const CORS = {
   "Access-Control-Allow-Origin": process.env.ALLOWED_ORIGIN ?? "*",
@@ -54,7 +55,11 @@ function expectedMediaPrefix(userId: string): string {
 }
 
 function badRequest(error: string): APIGatewayProxyResult {
-  return { statusCode: 400, headers: CORS, body: JSON.stringify({ error }) };
+  return {
+    statusCode: 400,
+    headers: CORS,
+    body: JSON.stringify(errorEnvelope(new AppError("validation.invalid_request", { message: error }))),
+  };
 }
 
 async function getUserId(crdb: CrdbClient, token: string): Promise<string> {
@@ -102,13 +107,11 @@ export async function handlePresignAttachment(
 
     return { statusCode: 200, headers: CORS, body: JSON.stringify({ v: 1, key, uploadUrl }) };
   } catch (err) {
-    logger.error("attachments.presign_failed", "presignAttachment error", {
-      err: err instanceof Error ? err.message : String(err),
-    });
+    const appErr = reportError(err);
     return {
-      statusCode: 500,
+      statusCode: appErr.statusCode,
       headers: CORS,
-      body: JSON.stringify({ error: "Failed to presign upload" }),
+      body: JSON.stringify(errorEnvelope(appErr)),
     };
   }
 }
@@ -195,13 +198,11 @@ export async function handleCreateAttachment(
       body: JSON.stringify({ v: 1, ok: true, nodeId, attachmentId: nodeId }),
     };
   } catch (err) {
-    logger.error("attachments.create_failed", "createAttachment error", {
-      err: err instanceof Error ? err.message : String(err),
-    });
+    const appErr = reportError(err);
     return {
-      statusCode: 500,
+      statusCode: appErr.statusCode,
       headers: CORS,
-      body: JSON.stringify({ error: "Failed to save attachment" }),
+      body: JSON.stringify(errorEnvelope(appErr)),
     };
   }
 }
@@ -245,13 +246,11 @@ export async function handleListAttachments(
       }),
     };
   } catch (err) {
-    logger.error("attachments.list_failed", "listAttachments error", {
-      err: err instanceof Error ? err.message : String(err),
-    });
+    const appErr = reportError(err);
     return {
-      statusCode: 500,
+      statusCode: appErr.statusCode,
       headers: CORS,
-      body: JSON.stringify({ error: "Failed to list attachments" }),
+      body: JSON.stringify(errorEnvelope(appErr)),
     };
   }
 }
@@ -273,7 +272,7 @@ export async function handleDeleteAttachment(
       [id, userId],
     );
     if (!row) {
-      return { statusCode: 404, headers: CORS, body: JSON.stringify({ error: "Attachment not found" }) };
+      return { statusCode: 404, headers: CORS, body: JSON.stringify(errorEnvelope(new AppError("media.not_found"))) };
     }
 
     if (row.s3_key) {
@@ -295,13 +294,11 @@ export async function handleDeleteAttachment(
 
     return { statusCode: 200, headers: CORS, body: JSON.stringify({ v: 1, ok: true, deletedId: id }) };
   } catch (err) {
-    logger.error("attachments.delete_failed", "deleteAttachment error", {
-      err: err instanceof Error ? err.message : String(err),
-    });
+    const appErr = reportError(err);
     return {
-      statusCode: 500,
+      statusCode: appErr.statusCode,
       headers: CORS,
-      body: JSON.stringify({ error: "Failed to delete attachment" }),
+      body: JSON.stringify(errorEnvelope(appErr)),
     };
   }
 }

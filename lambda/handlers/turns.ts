@@ -6,7 +6,7 @@
 
 import { APIGatewayProxyResult } from "aws-lambda";
 import { CrdbClient } from "../lib/crdb";
-import { logger } from "../lib/logger";
+import { errorEnvelope, reportError } from "../lib/errors";
 
 interface ChatTurnRow {
   id: string;
@@ -61,13 +61,11 @@ export async function handleListSessionTurns(
       }),
     };
   } catch (err) {
-    logger.error("turns.list_failed", "listSessionTurns error", {
-      err: err instanceof Error ? err.message : String(err),
-    });
+    const appErr = reportError(err);
     return {
-      statusCode: 500,
+      statusCode: appErr.statusCode,
       headers: CORS,
-      body: JSON.stringify({ error: "Failed to load session turns" }),
+      body: JSON.stringify(errorEnvelope(appErr)),
     };
   }
 }

@@ -11,7 +11,7 @@ import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
 import { CrdbClient } from "../lib/crdb";
 import { OpenRouterClient } from "../lib/openrouter";
 import { writeNodeEmbedding } from "../lib/vectorWriter";
-import { logger } from "../lib/logger";
+import { AppError, errorEnvelope, reportError } from "../lib/errors";
 
 interface MemoryNodeRow {
   id: string;
@@ -85,11 +85,11 @@ export async function handleListMemory(
       }),
     };
   } catch (err) {
-    logger.error("memory.list_failed", "listMemory error", { err: err instanceof Error ? err.message : String(err) });
+    const appErr = reportError(err);
     return {
-      statusCode: 500,
+      statusCode: appErr.statusCode,
       headers: CORS,
-      body: JSON.stringify({ error: "Failed to list memories" }),
+      body: JSON.stringify(errorEnvelope(appErr)),
     };
   }
 }
@@ -188,11 +188,11 @@ export async function handleUpsertMemory(
 
     return badRequest("Expected node or edge");
   } catch (err) {
-    logger.error("memory.upsert_failed", "upsertMemory error", { err: err instanceof Error ? err.message : String(err) });
+    const appErr = reportError(err);
     return {
-      statusCode: 500,
+      statusCode: appErr.statusCode,
       headers: CORS,
-      body: JSON.stringify({ error: "Failed to save memory" }),
+      body: JSON.stringify(errorEnvelope(appErr)),
     };
   }
 }
@@ -211,11 +211,11 @@ export async function handleDeleteMemory(
     );
     return { statusCode: 200, headers: CORS, body: JSON.stringify({ v: 1, ok: true, deletedId: id }) };
   } catch (err) {
-    logger.error("memory.delete_failed", "deleteMemory error", { err: err instanceof Error ? err.message : String(err) });
+    const appErr = reportError(err);
     return {
-      statusCode: 500,
+      statusCode: appErr.statusCode,
       headers: CORS,
-      body: JSON.stringify({ error: "Failed to delete memory" }),
+      body: JSON.stringify(errorEnvelope(appErr)),
     };
   }
 }
@@ -234,11 +234,11 @@ export async function handleDeleteMemoryEdge(
     );
     return { statusCode: 200, headers: CORS, body: JSON.stringify({ v: 1, ok: true, deletedEdgeId: id }) };
   } catch (err) {
-    logger.error("memory.delete_edge_failed", "deleteMemoryEdge error", { err: err instanceof Error ? err.message : String(err) });
+    const appErr = reportError(err);
     return {
-      statusCode: 500,
+      statusCode: appErr.statusCode,
       headers: CORS,
-      body: JSON.stringify({ error: "Failed to delete memory edge" }),
+      body: JSON.stringify(errorEnvelope(appErr)),
     };
   }
 }
@@ -283,5 +283,9 @@ function toNode(row: MemoryNodeRow) {
 }
 
 function badRequest(error: string): APIGatewayProxyResult {
-  return { statusCode: 400, headers: CORS, body: JSON.stringify({ error }) };
+  return {
+    statusCode: 400,
+    headers: CORS,
+    body: JSON.stringify(errorEnvelope(new AppError("validation.invalid_request", { message: error }))),
+  };
 }

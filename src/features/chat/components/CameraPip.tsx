@@ -3,6 +3,7 @@ import { analyzeImageSnapshot } from "@/features/chat/lib/attachmentAnalysis";
 import { indexAttachment } from "@/features/chat/lib/attachmentIndex";
 import { startFaceWorker, stopFaceWorker, analyzeFrame } from "@/workers/faceClient";
 import { cn } from "@/shared/lib/cn";
+import { classifyFetchError } from "@/shared/lib/errors";
 import { useAppStore } from "@/shared/store/appStore";
 import { toast } from "@/shared/store/toastStore";
 import { useDraggable } from "@dnd-kit/core";
@@ -119,8 +120,9 @@ export function CameraPip() {
       setSavedId(nodeId);
       toast("Snapshot indexed", `Emotion: ${emotions.primary} (${Math.round(emotions.confidence * 100)}%) → memory`, "teal");
     } catch (err) {
-      console.warn("[CameraPip] analyze-and-save failed:", err);
-      toast("Index failed", err instanceof Error ? err.message : String(err), "danger");
+      const classified = classifyFetchError(err);
+      console.warn("[CameraPip] analyze-and-save failed:", classified.code, err);
+      toast("Index failed", classified.message, "danger");
     } finally {
       setAnalyzing(false);
     }

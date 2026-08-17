@@ -10,9 +10,9 @@
 import { CrdbClient } from "../lib/crdb";
 import { OpenRouterClient } from "../lib/openrouter";
 import { toVectorLiteral } from "../lib/vectors";
-import { logger } from "../lib/logger";
 import { withSpan } from "../lib/telemetry";
 import { Context } from "@opentelemetry/api";
+import { AppError, errorEnvelope, reportError } from "../lib/errors";
 
 interface SearchRow {
   id: string;
@@ -37,7 +37,7 @@ export async function handleSemanticSearch(
     return {
       statusCode: 400,
       headers: corsHeaders(),
-      body: JSON.stringify({ error: "Missing required query parameter: q" }),
+      body: JSON.stringify(errorEnvelope(new AppError("validation.invalid_request", { message: "Missing required query parameter: q" }))),
     };
   }
 
@@ -89,13 +89,11 @@ export async function handleSemanticSearch(
       }),
     };
   } catch (err) {
-    logger.error("semantic.search_failed", "semanticSearch error", {
-      err: err instanceof Error ? err.message : String(err),
-    });
+    const appErr = reportError(err);
     return {
-      statusCode: 500,
+      statusCode: appErr.statusCode,
       headers: corsHeaders(),
-      body: JSON.stringify({ error: "Semantic search failed" }),
+      body: JSON.stringify(errorEnvelope(appErr)),
     };
   }
 }

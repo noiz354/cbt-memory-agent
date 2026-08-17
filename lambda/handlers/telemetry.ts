@@ -16,6 +16,7 @@
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
 import { randomInt } from "node:crypto";
 import { logger } from "../lib/logger";
+import { AppError, errorEnvelope, reportError } from "../lib/errors";
 
 export async function handleTelemetryRelay(
   event: APIGatewayProxyEvent,
@@ -24,11 +25,11 @@ export async function handleTelemetryRelay(
   const authHeader = process.env.OTEL_EXPORTER_OTLP_HEADERS;
 
   if (!endpoint || !authHeader) {
-    logger.error("telemetry.not_configured", "OTLP endpoint/auth not configured");
+    reportError(new AppError("dependency.telemetry_unavailable", { message: "OTLP endpoint/auth not configured" }));
     return {
       statusCode: 502,
       headers: relayCors(),
-      body: JSON.stringify({ error: "Telemetry not configured" }),
+      body: JSON.stringify(errorEnvelope(new AppError("dependency.telemetry_unavailable"))),
     };
   }
 
@@ -40,7 +41,7 @@ export async function handleTelemetryRelay(
     return {
       statusCode: 413,
       headers: relayCors(),
-      body: JSON.stringify({ error: "Payload too large" }),
+      body: JSON.stringify(errorEnvelope(new AppError("validation.payload_too_large"))),
     };
   }
 
@@ -76,11 +77,11 @@ export async function handleTelemetryRelay(
 
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      logger.error("telemetry.upstream_failed", "telemetry upstream error", { status: res.status, statusText: res.statusText, detail: text.slice(0, 200) });
+      reportError(new AppError("dependency.telemetry_unavailable", { message: `telemetry upstream ${res.status}`, cause: text.slice(0, 200) }));
       return {
         statusCode: 502,
         headers: relayCors(),
-        body: JSON.stringify({ error: "Telemetry upstream failed" }),
+        body: JSON.stringify(errorEnvelope(new AppError("dependency.telemetry_unavailable"))),
       };
     }
 
@@ -91,11 +92,11 @@ export async function handleTelemetryRelay(
       body: "",
     };
   } catch (err) {
-    logger.error("telemetry.relay_failed", "telemetry relay error", { err: err instanceof Error ? err.message : String(err) });
+    reportError(new AppError("dependency.telemetry_unavailable", { cause: err }));
     return {
       statusCode: 502,
       headers: relayCors(),
-      body: JSON.stringify({ error: "Telemetry relay failed" }),
+      body: JSON.stringify(errorEnvelope(new AppError("dependency.telemetry_unavailable"))),
     };
   }
 }

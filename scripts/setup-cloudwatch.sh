@@ -16,6 +16,9 @@
 #   8. cache_hit — Completion cache hit rate
 #   9. lambda_errors — 5xx rate
 #   10. consolidate_ms — Step Functions duration
+#   11. error_count — ADR-008 app errors (level=error)
+#   12. dependency_error_count — ADR-008 dependency errors
+#   13. internal_error_count — ADR-008 internal errors
 # ─────────────────────────────────────────────────────────────────────────────
 
 set -euo pipefail
@@ -179,6 +182,15 @@ create_alarm \
   "Step Functions consolidation > 30s" \
   "SEV3"
 
+# 10. ADR-008 — aplikasi error rate (level=error dari JSON logger) > 20 per 5min
+create_alarm \
+  "ApplicationErrorRate" \
+  "error_count" \
+  20 \
+  "GreaterThanThreshold" \
+  "Standardized app errors (level=error) > 20 per 5min — check CloudWatch Logs for error.code" \
+  "SEV2"
+
 echo ""
 
 # ─── Setup Metric Filters ────────────────────────────────────────────────────
@@ -221,6 +233,10 @@ create_metric_filter "CrisisShortCircuit" "crisis_short_circuit" '{$.crisis_enga
 create_metric_filter "RedactDrops" "redact_drops" '{$.redact_drops = *}'
 create_metric_filter "CacheHit" "cache_hit" '{$.cache_hit = *}'
 create_metric_filter "ConsolidateMs" "consolidate_ms" '{$.consolidate_ms = *}'
+# ADR-008: error standardisasi — setiap log level=error (envelope JSON logger)
+create_metric_filter "ErrorCount" "error_count" '{$.level = "error"}'
+create_metric_filter "DependencyErrors" "dependency_error_count" '{$.category = "dependency" && $.level = "error"}'
+create_metric_filter "InternalErrors" "internal_error_count" '{$.category = "internal" && $.level = "error"}'
 
 echo ""
 
@@ -296,7 +312,7 @@ echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 log_ok "CloudWatch Setup Complete!"
 echo ""
-echo "📊 Metrics (10):"
+echo "📊 Metrics (13):"
 echo "   1. complete_ms — LLM response latency"
 echo "   2. recall_ms — ANN query latency (SLO: <150ms)"
 echo "   3. ann_used — Vector index hit (0/1)"
@@ -307,8 +323,11 @@ echo "   7. redact_drops — Redacted spans"
 echo "   8. cache_hit — Completion cache hit rate"
 echo "   9. lambda_errors — 5xx rate"
 echo "   10. consolidate_ms — Step Functions duration"
+echo "   11. error_count — App errors (level=error)"
+echo "   12. dependency_error_count — Dependency errors"
+echo "   13. internal_error_count — Internal errors"
 echo ""
-echo "🚨 Alarms (9):"
+echo "🚨 Alarms (10):"
 echo "   - LambdaErrors (>5 per 5min) [SEV1]"
 echo "   - LambdaDuration (>25s) [SEV2]"
 echo "   - ANNMiss (vector index miss) [SEV2]"
@@ -318,6 +337,7 @@ echo "   - CrisisMissing (SEV0 drill) [SEV0]"
 echo "   - LowCacheHit (<20%) [SEV3]"
 echo "   - RecallLatency (>150ms SLO) [SEV2]"
 echo "   - ConsolidationSlow (>30s) [SEV3]"
+echo "   - ApplicationErrorRate (>20 per 5min) [SEV2]"
 echo ""
 echo "📈 Dashboard: CBTMemoryAgent"
 echo "   View: https://console.aws.amazon.com/cloudwatch/home#dashboards/dashboard:CBTMemoryAgent"

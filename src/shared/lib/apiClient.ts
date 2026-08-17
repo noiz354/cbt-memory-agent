@@ -14,7 +14,35 @@
  * Saat online → sync ke backend.
  */
 
+import { ApiError, ERROR_CODES, classifyFetchError } from "./errors";
+
 const API_BASE = import.meta.env.VITE_API_URL ?? "/api/v1";
+
+/**
+ * Build an ApiError from a non-ok HTTP response. Prefers the standardized
+ * backend envelope `{ error: { code, message, retriable } }`; falls back to a
+ * classified internal error when the body is not an envelope.
+ */
+function apiErrorFromResponse(res: Response, body: string): ApiError {
+  let parsed:
+    | { error?: { code?: string; message?: string; retriable?: boolean } }
+    | null = null;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    parsed = null;
+  }
+  const code = parsed?.error?.code;
+  if (code && (Object.values(ERROR_CODES) as string[]).includes(code)) {
+    return new ApiError(code as (typeof ERROR_CODES)[keyof typeof ERROR_CODES], parsed!.error!.message || res.statusText, {
+      retriable: parsed!.error!.retriable,
+      httpStatus: res.status,
+    });
+  }
+  return new ApiError(ERROR_CODES.internal, `API ${res.status}: ${res.statusText} — ${body.slice(0, 200)}`, {
+    httpStatus: res.status,
+  });
+}
 
 /**
  * Global 401 handler (set once at bootstrap). Fired whenever any authenticated
@@ -105,7 +133,7 @@ async function api<T>(path: string, options: ApiOptions = {}): Promise<T> {
     if (res.status === 401) notifyUnauthorized();
     if (res.status === 429) throw await rateLimitError(res);
     const body = await res.text().catch(() => "");
-    throw new Error(`API ${res.status}: ${res.statusText} — ${body.slice(0, 200)}`);
+    throw apiErrorFromResponse(res, body);
   }
 
   return res.json() as Promise<T>;
@@ -541,12 +569,23 @@ export const apiClient = {
 
   /** PUT raw blob langsung ke S3 memakai presigned URL. */
   uploadMediaToS3: async (uploadUrl: string, blob: Blob, mimeType?: string): Promise<void> => {
-    const res = await fetch(uploadUrl, {
-      method: "PUT",
-      headers: mimeType ? { "Content-Type": mimeType } : undefined,
-      body: blob,
-    });
-    if (!res.ok) throw new Error(`S3 upload ${res.status}: ${res.statusText}`);
+    let res: Response;
+    try {
+      res = await fetch(uploadUrl, {
+        method: "PUT",
+        headers: mimeType ? { "Content-Type": mimeType } : undefined,
+        body: blob,
+      });
+    } catch (err) {
+      // 'Failed to fetch' (CORS/CSP/network) vs pembatalan — jadikan diagnosable.
+      throw classifyFetchError(err);
+    }
+    if (!res.ok) {
+      throw new ApiError(ERROR_CODES.media_upload_failed, `S3 upload ${res.status}: ${res.statusText}`, {
+        retriable: true,
+        httpStatus: res.status,
+      });
+    }
   },
 
   /** POST /attachments — Simpan memory node kind=attachment + analysis. */

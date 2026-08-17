@@ -257,6 +257,7 @@ let dbDuration: ReturnType<ReturnType<typeof metrics.getMeter>["createHistogram"
 let genAiDuration: ReturnType<ReturnType<typeof metrics.getMeter>["createHistogram"]> | null = null;
 let s3Duration: ReturnType<ReturnType<typeof metrics.getMeter>["createHistogram"]> | null = null;
 let httpErrors: ReturnType<ReturnType<typeof metrics.getMeter>["createCounter"]> | null = null;
+let appErrors: ReturnType<ReturnType<typeof metrics.getMeter>["createCounter"]> | null = null;
 
 function getMeter(): ReturnType<typeof metrics.getMeter> | null {
   if (!meterProvider) return null;
@@ -276,6 +277,10 @@ function ensureMetrics(): void {
   });
   httpErrors = meter.createCounter("http.server.request.errors", {
     description: "Count of HTTP requests with error status (>=400)",
+    unit: "1",
+  });
+  appErrors = meter.createCounter("app.error.count", {
+    description: "Count of classified application errors by code/category",
     unit: "1",
   });
   dbDuration = meter.createHistogram("db.client.operation.duration", {
@@ -355,5 +360,19 @@ export function recordS3Operation(operation: string, durationMs: number): void {
   s3Duration?.record(durationMs, {
     [ATTR_RPC_SYSTEM]: "aws.s3",
     "aws.s3.operation": operation,
+  });
+}
+
+/**
+ * Record error terklasifikasi (dipanggil di reportError pada errors.ts).
+ * Label TERTUTUP — hanya error.code & category dari katalog ERROR_CODES,
+ * bukan pesan bebas / user ID / URL.
+ */
+export function recordError(code: string, category: string, statusCode: number): void {
+  ensureMetrics();
+  appErrors?.add(1, {
+    "error.code": code,
+    "error.category": category,
+    "http.response.status_code.class": statusClass(statusCode),
   });
 }

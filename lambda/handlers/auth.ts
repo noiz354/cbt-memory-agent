@@ -16,6 +16,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { APIGatewayProxyEvent } from "aws-lambda";
 import { CrdbClient } from "../lib/crdb";
 import { logger } from "../lib/logger";
+import { AppError, errorEnvelope, reportError } from "../lib/errors";
 
 const MAGIC_LINK_TTL_MS = 10 * 60 * 1000;
 
@@ -106,13 +107,13 @@ export async function handleRequestMagicLink(
   try {
     body = JSON.parse(event.body ?? "{}");
   } catch {
-    return json(400, { error: "Invalid JSON body" });
+    return json(400, errorEnvelope(new AppError("validation.invalid_json")));
   }
 
   const email = (body.email ?? "").trim().toLowerCase();
   const displayName = (body.displayName ?? "").trim() || email.split("@")[0];
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    return json(400, { error: "A valid email is required" });
+    return json(400, errorEnvelope(new AppError("validation.invalid_request", { message: "A valid email is required" })));
   }
 
   const token = randomBytes(32).toString("base64url");
@@ -126,8 +127,8 @@ export async function handleRequestMagicLink(
       [email, tokenHash, expiresAt],
     );
   } catch (err) {
-    logger.error("auth.magic_link_insert_failed", "auth/magic-link insert error", { err: err instanceof Error ? err.message : String(err) });
-    return json(500, { error: "Failed to store token" });
+    const appErr = reportError(new AppError("auth.magic_link_failed", { cause: err }));
+    return json(appErr.statusCode, errorEnvelope(appErr));
   }
 
   // ALLOWED_ORIGIN is often "*" (CORS) — never use it as the link origin,
@@ -145,7 +146,8 @@ export async function handleRequestMagicLink(
       return json(200, { ok: true, sent: false, devUrl: link });
     }
     logger.warn("auth.resend_send_failed", "Resend send failed", { error: sent.error });
-    return json(502, { ok: false, sent: false, error: sent.error });
+    const appErr = reportError(new AppError("auth.resend_failed", { cause: sent.error }));
+    return json(appErr.statusCode, errorEnvelope(appErr));
   }
 
   return json(200, { ok: true, sent: true });
@@ -159,11 +161,11 @@ export async function handleConsumeMagicLink(
   try {
     body = JSON.parse(event.body ?? "{}");
   } catch {
-    return json(400, { error: "Invalid JSON body" });
+    return json(400, errorEnvelope(new AppError("validation.invalid_json")));
   }
 
   const token = (body.token ?? "").trim();
-  if (!token) return json(400, { error: "A token is required" });
+  if (!token) return json(400, errorEnvelope(new AppError("validation.invalid_request", { message: "A token is required" })));
 
   const tokenHash = sha256(token);
 
@@ -178,10 +180,10 @@ export async function handleConsumeMagicLink(
       [tokenHash],
     );
 
-    if (!row) return json(401, { error: "Link is not valid" });
-    if (row.used_at) return json(401, { error: "This link has already been used" });
+    if (!row) return json(401, errorEnvelope(new AppError("auth.invalid_token", { message: "Link is not valid" })));
+    if (row.used_at) return json(401, errorEnvelope(new AppError("auth.invalid_token", { message: "This link has already been used" })));
     if (new Date(row.expires_at).getTime() < Date.now()) {
-      return json(401, { error: "This link has expired" });
+      return json(401, errorEnvelope(new AppError("auth.invalid_token", { message: "This link has expired" })));
     }
 
     await crdb.execute(
@@ -210,7 +212,7 @@ export async function handleConsumeMagicLink(
 
     return json(200, { ok: true, userId: userId?.user_id ?? "", sessionToken, email });
   } catch (err) {
-    logger.error("auth.callback_failed", "auth/callback error", { err: err instanceof Error ? err.message : String(err) });
-    return json(500, { error: "Failed to verify token" });
+    const appErr = reportError(new AppError("auth.callback_failed", { cause: err }));
+    return json(appErr.statusCode, errorEnvelope(appErr));
   }
 }

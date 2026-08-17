@@ -20,6 +20,7 @@ import {
   validateEventsPayload,
   type IncomingEvent,
 } from "../lib/monetization";
+import { AppError, errorEnvelope, reportError } from "../lib/errors";
 
 interface UserIdRow {
   user_id: string;
@@ -112,18 +113,18 @@ export async function handleTrackEvents(
   try {
     body = JSON.parse(event.body ?? "{}");
   } catch {
-    return json(400, { error: "Invalid JSON body" });
+    return jsonError(400, new AppError("validation.invalid_json"));
   }
 
   const parsed = validateEventsPayload(body);
   if (!parsed.ok || !parsed.events) {
-    return json(400, { error: parsed.error ?? "Invalid events payload" });
+    return jsonError(400, new AppError("validation.invalid_request", { message: parsed.error ?? "Invalid events payload" }));
   }
 
   const { valid, rejected } = partitionEvents(parsed.events);
   if (valid.length === 0) {
     return json(422, {
-      error: "No allowed monetization events in batch",
+      ...errorEnvelope(new AppError("validation.invalid_request", { message: "No allowed monetization events in batch" })),
       rejected: rejected.map((r) => r.name),
     });
   }
@@ -132,10 +133,8 @@ export async function handleTrackEvents(
   try {
     userId = await ensureUser(crdb, token);
   } catch (err) {
-    logger.error("events.user_failed", "failed to ensure user", {
-      err: err instanceof Error ? err.message : String(err),
-    });
-    return json(500, { error: "Failed to resolve identity" });
+    const appErr = reportError(err);
+    return jsonError(appErr.statusCode, appErr);
   }
 
   const params: unknown[] = [];
@@ -160,11 +159,8 @@ export async function handleTrackEvents(
       params,
     );
   } catch (err) {
-    logger.error("events.insert_failed", "failed to insert events", {
-      err: err instanceof Error ? err.message : String(err),
-      count: valid.length,
-    });
-    return json(500, { error: "Failed to persist events" });
+    const appErr = reportError(err);
+    return jsonError(appErr.statusCode, appErr);
   }
 
   await writeCrisisAudit(crdb, userId, valid);
@@ -190,4 +186,8 @@ function json(statusCode: number, body: Record<string, unknown>): APIGatewayProx
     },
     body: JSON.stringify(body),
   };
+}
+
+function jsonError(statusCode: number, appErr: AppError): APIGatewayProxyResult {
+  return json(statusCode, errorEnvelope(appErr));
 }

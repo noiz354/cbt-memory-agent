@@ -14,10 +14,11 @@ import { z } from "zod";
 import { Context } from "@opentelemetry/api";
 import { CrdbClient } from "../lib/crdb";
 import { OpenRouterClient } from "../lib/openrouter";
-import { withSpan } from "../lib/telemetry";
+import { withSpan, normalizeRoute } from "../lib/telemetry";
 import { logger } from "../lib/logger";
 import { reciprocalRankFusion } from "../lib/retrieval";
 import { toVectorLiteral } from "../lib/vectors";
+import { reportError, ERROR_CODES } from "../lib/errors";
 
 const chatTurnSchema = z.object({
   v: z.literal(1),
@@ -188,9 +189,8 @@ export async function handleChatTurn(
       body: sse,
     };
   } catch (err) {
-    logger.error("chat.turn_failed", "chatTurn error", {
-      err: err instanceof Error ? err.message : String(err),
-    });
+    reportError(err, { route: normalizeRoute("/api/v1/chat/turn") });
+    const chatErr = ERROR_CODES["chat.turn_failed"];
     return {
       statusCode: 200,
       headers: cors,
@@ -199,7 +199,7 @@ export async function handleChatTurn(
         JSON.stringify({
           error: true,
           code: "chat_turn_failed",
-          message: "Terjadi kendala teknis. Coba lagi dalam beberapa saat.",
+          message: chatErr.message,
         }) +
         "\n\ndata: [DONE]\n\n",
     };

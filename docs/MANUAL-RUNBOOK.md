@@ -2,9 +2,10 @@
 
 > Runbook pengetesan **manusia** terhadap fitur yang sudah **live** di produksi:
 > Emotional Media Attachments, Reflection Loop (MCP + cluster health gate + skills),
-> recall hybrid RRF, dan **11 perbaikan gap audit integrasi frontend-backend**
-> (commits `158cc2a`..`76328ed`, `docs/FRONTEND-INTEGRATION-AUDIT.md`).
-> Update: 2026-08-16. Backend: Lambda Function URL (`CBT Memory Agent`),
+> recall hybrid RRF, **11 perbaikan gap audit integrasi frontend-backend**
+> (commits `158cc2a`..`76328ed`, `docs/FRONTEND-INTEGRATION-AUDIT.md`), dan
+> **Error Standardization (ADR-008, §10)**.
+> Update: 2026-08-18. Backend: Lambda Function URL (`CBT Memory Agent`),
 > DB: CockroachDB Cloud `woozy-grivet` (v26.2.5).
 
 ## 1. Lingkungan uji
@@ -272,3 +273,72 @@ cockroach sql --url "$CRDB_URL" --execute "
   (default false) — cek Tempo/Grafana untuk span-nya.
 - **Cluster health**: ccloud CLI tidak ada di Lambda → REST fallback dipakai
   (`status UNSPECIFIED` pada cluster belum aktif — dianggap sehat, loop lanjut).
+
+---
+
+## 10. Error Standardization (ADR-008) — verifikasi envelope terpusat
+
+> Semua error backend kini melewati **satu choke point** `reportError` (`lambda/lib/errors.ts`):
+> tepat satu emisi per kegagalan → `logger.error` (CloudWatch) + `emitLog` (Loki) +
+> `recordError` (Mimir `app.error.count`) + span `setStatus(ERROR)` (Tempo). Client menerima
+> **envelope seragam** `{"error":{"code":"...","message":"...","retriable":true|false}}`.
+> Katalog lengkap kode + keputusan: `docs/15-8-26/ADR-008-error-standardization.md`.
+
+### 10.1 Envelope bentuk standar (via curl)
+
+```bash
+BASE="https://4nmncatsvaol2rvmptexmxeoea0myqrr.lambda-url.ap-southeast-3.on.aws"
+# Without auth → 401 auth.*
+curl -s -i "$BASE/api/v1/metrics" | head -20
+# Expect: HTTP/1.1 401 + header X-Trace-Id: <hex32>
+#         {"error":{"code":"auth.invalid_token","message":"...","retriable":false}}
+
+# Unknown route → 404 resource.not_found
+curl -s "$BASE/api/v1/nope" | python3 -m json.tool
+# Expect: {"error":{"code":"resource.not_found","message":"Not found","retriable":false}}
+
+# Invalid JSON body → 400 validation.*
+curl -s "$BASE/api/v1/attachments/presign" \
+  -H "Authorization: Bearer tester-$(date +%s)" -H "X-Device-Id: runbook-device-1" \
+  -H "Content-Type: application/json" -d '{nope'
+# Expect: {"error":{"code":"validation.invalid_json","message":"Invalid JSON body","retriable":false}}
+
+# Invalid kind → 400 validation.* (masih envelope)
+curl -s "$BASE/api/v1/attachments/presign" \
+  -H "Authorization: Bearer tester-$(date +%s)" -H "X-Device-Id: runbook-device-1" \
+  -H "Content-Type: application/json" -d '{"v":1,"kind":"pdf","ext":"pdf"}'
+# Expect: {"error":{"code":"validation.invalid_request","message":"Expected kind in ...","retriable":false}}
+```
+
+**Pemeriksaan kunci:**
+1. **Tidak ada `err.message` mentah / stack trace ke client** — hanya `code` + `message` + `retriable`.
+2. SEMUA response error membawa header `X-Trace-Id` — cari id-nya lalu follow di Tempo/Loki.
+
+### 10.2 Korelasi trace → Tempo/Loki
+
+```bash
+# Ambil trace_id dari error di atas (header X-Trace-Id), lalu:
+grep '"trace_id"' /tmp/opencode/lambda-monitor.log    # atau di Grafana Loki: {service_name="cbt-memory-agent-backend"} |= "auth.invalid_token"
+```
+Harapan: log JSON berisi `level:"error"`, `event:<code>`, `code:<code>`, `category`, `status`,
+`retriable`, `trace_id`, `span_id` — 1 baris per gagal (bukan 2+ logger.error berbeda).
+
+### 10.3 Metric Mimir + CloudWatch
+
+- **Mimir/Grafana**: counter `app.error.count` increment per `error.code` (label `error.code`,
+  `error.category`, `http.response.status_code.class`) — query: `app.error.count` di Explorer.
+- **CloudWatch**: metric filter `error_count` (`{$.level = "error"}`) → namespace `CBTMemoryAgent`
+  metric `error_count`; alarm `CBT-ApplicationErrorRate` [SEV2] (>20 per 5min).
+  Tersedia setelah `bash scripts/setup-cloudwatch.sh` dijalankan.
+
+### Checklist Error Standardization
+
+| # | Verifikasi | Command ref | Pass/Fail |
+|---|---|---|---|
+| E1 | 401 → envelope `auth.*` + `X-Trace-Id` | §10.1 | ☐ |
+| E2 | 404 → envelope `resource.not_found` | §10.1 | ☐ |
+| E3 | 400 → envelope `validation.*` | §10.1 | ☐ |
+| E4 | Tidak ada leak `err.message`/stack ke client | §10.1 (seluruh respons) | ☐ |
+| E5 | Log error 1 baris JSON (`code`, `trace_id`) di CloudWatch | §10.2 | ☐ |
+| E6 | `app.error.count` ada di Mimir/Grafana | §10.3 | ☐ |
+| E7 | CameraPip "Analyze & save" error toast menampilkan pesan CORS/network diagnosable (bukan `Failed to fetch` mentah) | UI: fail kamera/CORS lalu "Index failed" | ☐ |

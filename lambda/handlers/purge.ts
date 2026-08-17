@@ -9,6 +9,7 @@ import { createHash } from "node:crypto";
 import { CrdbClient } from "../lib/crdb";
 import { S3ClientService } from "../lib/s3";
 import { logger } from "../lib/logger";
+import { AppError, errorEnvelope, reportError } from "../lib/errors";
 
 export async function handlePurge(
   event: APIGatewayProxyEvent,
@@ -21,7 +22,7 @@ export async function handlePurge(
   if (body?.confirmation !== "hard-purge") {
     return {
       statusCode: 400,
-      body: JSON.stringify({ v: 1, ok: false, error: "confirmation must be 'hard-purge'" }),
+      body: JSON.stringify({ v: 1, ok: false, ...errorEnvelope(new AppError("validation.invalid_request", { message: "confirmation must be 'hard-purge'" })) }),
     };
   }
 
@@ -53,13 +54,10 @@ export async function handlePurge(
       }),
     };
   } catch (err) {
+    const appErr = reportError(new AppError("purge.failed", { cause: err }));
     return {
-      statusCode: 500,
-      body: JSON.stringify({
-        v: 1,
-        ok: false,
-        error: err instanceof Error ? err.message : String(err),
-      }),
+      statusCode: appErr.statusCode,
+      body: JSON.stringify({ v: 1, ok: false, ...errorEnvelope(appErr) }),
     };
   }
 }

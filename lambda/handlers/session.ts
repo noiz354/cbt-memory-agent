@@ -8,7 +8,7 @@
 
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
 import { CrdbClient } from "../lib/crdb";
-import { logger } from "../lib/logger";
+import { AppError, errorEnvelope, reportError } from "../lib/errors";
 
 interface SessionRow {
   id: string;
@@ -95,11 +95,11 @@ export async function handleSaveSession(
     );
     return { statusCode: 200, headers: CORS, body: JSON.stringify({ v: 1, ok: true, id: s.id }) };
   } catch (err) {
-    logger.error("session.save_failed", "saveSession error", { err: err instanceof Error ? err.message : String(err) });
+    const appErr = reportError(err);
     return {
-      statusCode: 500,
+      statusCode: appErr.statusCode,
       headers: CORS,
-      body: JSON.stringify({ error: "Failed to save session" }),
+      body: JSON.stringify(errorEnvelope(appErr)),
     };
   }
 }
@@ -142,11 +142,11 @@ export async function handleListSessions(
       body: JSON.stringify({ v: 1, sessions: rows.map(toSession) }),
     };
   } catch (err) {
-    logger.error("session.list_failed", "listSessions error", { err: err instanceof Error ? err.message : String(err) });
+    const appErr = reportError(err);
     return {
-      statusCode: 500,
+      statusCode: appErr.statusCode,
       headers: CORS,
-      body: JSON.stringify({ error: "Failed to list sessions" }),
+      body: JSON.stringify(errorEnvelope(appErr)),
     };
   }
 }
@@ -183,5 +183,9 @@ function toSession(row: SessionRow) {
 }
 
 function badRequest(error: string): APIGatewayProxyResult {
-  return { statusCode: 400, headers: CORS, body: JSON.stringify({ error }) };
+  return {
+    statusCode: 400,
+    headers: CORS,
+    body: JSON.stringify(errorEnvelope(new AppError("validation.invalid_request", { message: error }))),
+  };
 }
