@@ -34,8 +34,12 @@ cp "$SKILLS_SRC/cockroachdb-query-and-schema-design/cockroachdb-sql/SKILL.md" \
 cp "$SKILLS_SRC/cockroachdb-observability-and-diagnostics/profiling-statement-fingerprints/SKILL.md" \
    "$SKILLS_DST/cockroachdb-observability-and-diagnostics/profiling-statement-fingerprints/"
 
+echo ">> Copying master prompt (klinik-psikolog.md) into bundle..."
+mkdir -p dist/prompts
+cp "$ROOT/prompts/klinik-psikolog.md" dist/prompts/
+
 echo ">> Creating $OUT_ZIP..."
 rm -f "$OUT_ZIP"
 cd dist
-zip -qr "$OUT_ZIP" index.js skills
+zip -qr "$OUT_ZIP" index.js skills prompts
 echo ">> Done: $(ls -lh "$OUT_ZIP" | awk '{print $5}')"

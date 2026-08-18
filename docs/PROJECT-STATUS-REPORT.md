@@ -80,7 +80,7 @@ User → Frontend (React, on-device: VAD/face/crisis detection)
      → handleChatTurn:
          upsertUser (md5(token)::uuid deterministic)
          getMemoryContext → 3-set RRF (heuristic + to_tsvector + vector) from CockroachDB
-         build CBT prompt (system guardrails + memory context, NO PII)
+         build master prompt (klinik psikolog dari prompts/klinik-psikolog.md + memory context, NO PII)
          llm.streamChat → OpenRouter SSE → relayed as SSE {t:...} + meta {injectedMemoryIds}
          save chat_turns (user+assistant) + upsert session
      → Every 6h: EventBridge {source:agent.memory,detail-type:reflect} → handler detects

@@ -35,7 +35,7 @@ Catatan verifikasi:
    - API key dari `process.env.OPENROUTER_API_KEY`
 2. **Hapus `lambda/lib/bedrock.ts`**
 3. **`handlers/chatTurn.ts`** — implementasi penuh:
-   - Parse body (zod) → upsert user `md5(token)::uuid` → ambil memory context → CBT prompt → stream OpenRouter → SSE `data: {t:"..."}` + `data: [DONE]` → simpan chat_turns
+   - Parse body (zod) → upsert user `md5(token)::uuid` → ambil memory context → master prompt (`prompts/klinik-psikolog.md` via `promptLoader.ts`) → stream OpenRouter → SSE `data: {t:"..."}` + `data: [DONE]` → simpan chat_turns
 4. **`handlers/semanticSearch.ts`** — implementasi penuh:
    - embedding query → `SELECT ... 1 - (embedding <=> $1::vector) AS score ... ORDER BY <=> LIMIT n` → `{v:1, results}`
 5. **`handlers/health.ts`** — `bedrock` → `llm` field

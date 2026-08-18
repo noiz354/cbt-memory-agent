@@ -20,6 +20,7 @@ import { reciprocalRankFusion } from "../lib/retrieval";
 import { toVectorLiteral } from "../lib/vectors";
 import { reportError, ERROR_CODES } from "../lib/errors";
 import { isOpenRouterQuotaError } from "../lib/openrouter";
+import { loadMasterPrompt } from "../lib/promptLoader";
 
 const QUOTA_EXHAUSTED_MESSAGE =
   "Kuota harian model gratis OpenRouter habis. Tambah credit akun OpenRouter atau gunakan API key sendiri (Settings → LLM).";
@@ -56,6 +57,18 @@ Follow these guardrails:
 - If the user expresses thoughts of self-harm or suicide, respond with immediate empathy and urge them to contact local crisis services (in Indonesia: 119, or emergency 112).
 - Keep responses concise (under ~250 words) and end with one gentle, actionable question.
 - If there is no memory context, acknowledge the user warmly and ask how they are feeling.`;
+
+/**
+ * SYSTEM_PROMPT yang dipakai handler — diambil dari master prompt
+ * (prompts/klinik-psikolog.md) via loader, dengan fallback ke konstanta di atas
+ * bila file tidak tersedia (mis. dev tanpa file prompt).
+ */
+async function resolveSystemPrompt(): Promise<string> {
+  const loaded = await loadMasterPrompt();
+  // Loader sudah fallback ke prompt lama bila file hilang; di sini kita hanya
+  // memastikan handler selalu punya prompt non-kosong.
+  return loaded.trim().length > 0 ? loaded : SYSTEM_PROMPT;
+}
 
 interface MemoryContext {
   id: string;
@@ -125,8 +138,10 @@ export async function handleChatTurn(
             .join("\n")
         : "No stored memories for this user yet.";
 
+    const systemPrompt = await resolveSystemPrompt();
+
     const messages = [
-      { role: "system" as const, content: SYSTEM_PROMPT },
+      { role: "system" as const, content: systemPrompt },
       {
         role: "system" as const,
         content: `Memory context:\n${contextBlock}`,

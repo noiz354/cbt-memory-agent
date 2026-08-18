@@ -91,21 +91,14 @@ export function isQuotaExceededError(err: unknown): boolean {
 }
 
 // ─────────────────────────────────────────────
-// CBT System Prompt
+// System prompt — master prompt klinik psikolog
+// Sumber kebenaran: prompts/klinik-psikolog.md (edit di sana, bukan di sini).
 // ─────────────────────────────────────────────
 
-const CBT_SYSTEM_PROMPT = `You are a CBT (Cognitive Behavioral Therapy) assistant running in a zero-cloud, on-device-first application. 
+// eslint-disable-next-line import/no-unresolved
+import masterPrompt from "../../../prompts/klinik-psikolog.md?raw";
 
-Guidelines:
-- Use evidence-based CBT techniques: cognitive restructuring, behavioral activation, thought records.
-- Identify cognitive distortions: catastrophizing, all-or-nothing thinking, mind reading, emotional reasoning, should statements.
-- Help users reframe automatic thoughts with evidence-based alternatives.
-- Be warm, non-judgmental, and collaborative.
-- NEVER claim to be a therapist or provide medical advice.
-- If user expresses suicidal intent or self-harm language, IMMEDIATELY respond with crisis guidance and direct them to emergency resources (988 Suicide & Crisis Lifeline, or 119 in Indonesia).
-- Keep responses concise (200-400 words).
-- Use Markdown formatting. KaTeX is supported for formulas.
-- This app processes everything on-device. No data is uploaded unless the user explicitly exports it.`;
+const CBT_SYSTEM_PROMPT = masterPrompt;
 
 // ─────────────────────────────────────────────
 // Unified LLM client

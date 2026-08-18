@@ -250,7 +250,7 @@ def query_semantic(query: str, user_id: str, limit: int = 5, min_confidence: flo
 |---|---|---|
 | **LLM (OpenRouter)** | `openrouter/free` untuk CBT response | POST `/chat/turn` |
 | **CockroachDB MCP Server** | AI agent query CRDB via MCP protocol | Wajib tool #1 |
-| **Prompt Engineering** | CBT system prompt + context injection | `src/shared/lib/llmClient.ts` (CBT_SYSTEM_PROMPT) |
+| **Prompt Engineering** | Master prompt klinik psikolog + context injection | `prompts/klinik-psikolog.md` (dibaca via `src/shared/lib/llmClient.ts` & `lambda/lib/promptLoader.ts`) |
 | **Streaming** | SSE response dari OpenRouter | apiClient.ts streaming |
 | **Context Window** | Memory nodes + chat history → prompt | RAG pattern |
 

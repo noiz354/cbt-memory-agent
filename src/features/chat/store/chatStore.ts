@@ -112,9 +112,9 @@ function buildCBTPrompt(userText: string, memories: InjectedMemory[]): string {
       ? `\n\nWorking context: ${memories.map((m) => m.title).join(", ")}.`
       : "";
 
-  return `User message: "${userText.slice(0, 200)}${userText.length > 200 ? "…" : ""}"
-${memoryNote}
-Respond using CBT techniques: identify the automatic thought, name the cognitive distortion, suggest an evidence-based reframe. Keep it warm, concise (200-400 words), and collaborative.`;
+  // Master prompt (klinik psikolog) disuntikkan sebagai system message oleh
+  // callLLM; di sini hanya membungkus pesan user + konteks memory yang dipilih.
+  return `User message: "${userText.slice(0, 200)}${userText.length > 200 ? "…" : ""}"${memoryNote}`;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
