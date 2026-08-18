@@ -10,5 +10,7 @@ output "parameter_paths" {
     daily_cap             = aws_ssm_parameter.openrouter_daily_cap.name
     grafana_otlp_endpoint = aws_ssm_parameter.grafana_otlp_endpoint.name
     grafana_otlp_headers  = aws_ssm_parameter.grafana_otlp_headers.name
+    phoenix_otlp_endpoint = try(aws_ssm_parameter.phoenix_otlp_endpoint[0].name, "")
+    phoenix_otlp_headers  = try(aws_ssm_parameter.phoenix_otlp_headers[0].name, "")
   }
 }

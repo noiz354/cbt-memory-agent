@@ -34,6 +34,7 @@ import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-ho
 import { OTLPMetricExporter } from "@opentelemetry/exporter-metrics-otlp-http";
 import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-http";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
+import { OTLPTraceExporter as OTLPProtoTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { PeriodicExportingMetricReader, MeterProvider } from "@opentelemetry/sdk-metrics";
 import { LoggerProvider, BatchLogRecordProcessor } from "@opentelemetry/sdk-logs";
@@ -56,6 +57,61 @@ import {
 const SERVICE_NAME = process.env.OTEL_SERVICE_NAME ?? "cbt-memory-agent-backend";
 const SERVICE_VERSION = "0.1.0";
 
+/**
+ * Atribut payload LLM yang boleh berisi prompt/response asli. Spans yang dikirim ke
+ * Arize Phoenix menyertakan ini (untuk render input/output di UI), TAPI atribut ini
+ * DI-STRIP dari ekspor menuju Grafana Tempo — prompt tidak boleh bocor ke dashboard
+ * observability pihak ketiga/perusahaan.
+ */
+const LLM_PAYLOAD_ATTRIBUTE_KEYS =
+  /^(gen_ai\.(request|response)\.|input\.value|output\.value|llm\.(input|output)_messages)/;
+
+/**
+ * Parse format env OTel `Authorization=Bearer <key>,OtherKey=value` → record.
+ * Nilai boleh mengandung `=` (mis. token JWT/base64), jadi split hanya pada `=` pertama.
+ */
+export function parseOtlpHeaders(raw: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const pair of raw.split(",")) {
+    const idx = pair.indexOf("=");
+    if (idx <= 0) continue;
+    const key = pair.slice(0, idx).trim();
+    const value = pair.slice(idx + 1).trim();
+    if (key && value) out[key] = value;
+  }
+  return out;
+}
+
+/**
+ * Wrapper SpanExporter yang men-strip atribut payload LLM sebelum ekspor.
+ * Dipakai membungkus exporter Grafana sehingga dual-sink tetap mengirim span
+ * yang sama, namun versi ke Grafana bebas prompt/response (governance).
+ */
+class StrippingExporter {
+  constructor(
+    private readonly inner: import("@opentelemetry/sdk-trace-base").SpanExporter,
+    private readonly stripper: (key: string) => boolean,
+  ) {}
+
+  export(
+    spans: import("@opentelemetry/sdk-trace-base").ReadableSpan[],
+    resultCallback: (result: import("@opentelemetry/core").ExportResult) => void,
+  ): void {
+    const cleaned = spans.map((span) => {
+      const attributes = { ...span.attributes };
+      for (const key of Object.keys(attributes)) {
+        if (this.stripper(key)) delete attributes[key];
+      }
+      return { ...span, attributes };
+    });
+    return this.inner.export(cleaned, resultCallback);
+  }
+
+  shutdown(): Promise<void> {
+    return this.inner.shutdown();
+  }
+}
+
 let tracerProvider: TracerProvider | null = null;
 let meterProvider: MeterProvider | null = null;
 let loggerProvider: LoggerProvider | null = null;
@@ -75,9 +131,11 @@ export function setupTelemetry(): void {
   if (initialized) return;
   initialized = true;
 
-  const endpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
-  if (!endpoint) {
-    console.warn("[otel] OTEL_EXPORTER_OTLP_ENDPOINT not set — telemetry disabled");
+  const grafanaEndpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
+  const phoenixEndpoint = process.env.PHOENIX_OTLP_ENDPOINT;
+  const phoenixHeaders = process.env.PHOENIX_OTLP_HEADERS;
+  if (!grafanaEndpoint && !phoenixEndpoint) {
+    console.warn("[otel] no OTLP endpoint set — telemetry disabled");
     return;
   }
 
@@ -91,15 +149,39 @@ export function setupTelemetry(): void {
     // selalu ROOT_CONTEXT → logger tidak pernah dapat trace_id/span_id.
     context.setGlobalContextManager(new AsyncLocalStorageContextManager());
 
-    // Traces
-    tracerProvider = new TracerProvider({
-      resource,
-      spanProcessors: [
+    // Traces — dual-sink:
+    //   Grafana: HTTP/JSON, atribut payload LLM DI-STRIP (governance — prompt tidak
+    //            boleh bocor ke dashboard perusahaan/third-party).
+    //   Phoenix: HTTP/protobuf, atribut payload PENUH (prompt/response) utk LLM
+    //            observability di UI Phoenix. Aktif hanya jika endpoint diset.
+    const spanProcessors: BatchSpanProcessor[] = [];
+
+    if (grafanaEndpoint) {
+      spanProcessors.push(
         new BatchSpanProcessor({
-          exporter: new OTLPTraceExporter(),
+          exporter: new StrippingExporter(new OTLPTraceExporter(), (key) =>
+            LLM_PAYLOAD_ATTRIBUTE_KEYS.test(key),
+          ),
           exportTimeoutMillis: 8000,
         }),
-      ],
+      );
+    }
+
+    if (phoenixEndpoint && phoenixHeaders) {
+      spanProcessors.push(
+        new BatchSpanProcessor({
+          exporter: new OTLPProtoTraceExporter({
+            url: `${phoenixEndpoint.replace(/\/+$/, "")}/v1/traces`,
+            headers: parseOtlpHeaders(phoenixHeaders),
+          }),
+          exportTimeoutMillis: 8000,
+        }),
+      );
+    }
+
+    tracerProvider = new TracerProvider({
+      resource,
+      spanProcessors,
     });
     trace.setGlobalTracerProvider(tracerProvider);
 
@@ -129,7 +211,9 @@ export function setupTelemetry(): void {
     logger = loggerProvider.getLogger(SERVICE_NAME, SERVICE_VERSION);
 
     propagation.setGlobalPropagator(new W3CTraceContextPropagator());
-    console.log(`[otel] telemetry enabled → ${endpoint} (service=${SERVICE_NAME})`);
+    console.log(
+      `[otel] telemetry enabled → grafana=${grafanaEndpoint ? "on" : "off"}, phoenix=${phoenixEndpoint ? "on" : "off"} (service=${SERVICE_NAME})`,
+    );
   } catch (err) {
     console.error("[otel] setup failed — telemetry disabled:", err);
     tracerProvider = null;
@@ -169,7 +253,10 @@ export function sanitizeAttributes(
     if (DENYLIST_KEYS.test(key)) continue;
     if (typeof value === "string") {
       const redacted = value.replace(UUID_PATTERN, "<redacted>");
-      if (redacted.length > 512) continue;
+      // Atribut payload LLM (prompt/response) bisa panjang — beri batas besar utk
+      // lintas ke Phoenix; selain itu tetap cap ketat 512 utk metadata biasa.
+      const cap = LLM_PAYLOAD_ATTRIBUTE_KEYS.test(key) ? 32_768 : 512;
+      if (redacted.length > cap) continue;
       out[key] = redacted;
       continue;
     }

@@ -62,3 +62,16 @@ variable "app_url" {
   type        = string
   default     = "http://localhost:5173"
 }
+
+variable "phoenix_otlp_endpoint" {
+  description = "Arize Phoenix OTLP endpoint (self-hosted EC2, HTTP di port UI). Kosong = Phoenix dinonaktifkan."
+  type        = string
+  default     = ""
+}
+
+variable "phoenix_otlp_headers" {
+  description = "Arize Phoenix OTLP auth headers (Authorization=Bearer <system-api-key>)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}

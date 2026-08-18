@@ -108,6 +108,8 @@ export class OpenRouterClient {
     span.setAttribute(ATTR_GEN_AI_SYSTEM, "openrouter");
     span.setAttribute(ATTR_GEN_AI_OPERATION_NAME, "embeddings");
     span.setAttribute("gen_ai.request.model", EMBED_MODEL);
+    span.setAttribute("openinference.span.kind", "EMBEDDING");
+    span.setAttribute("input.value", trimmed.slice(0, 30_000));
 
     try {
       const res = await context.with(trace.setSpan(parentCtx, span), async () => {
@@ -236,6 +238,8 @@ export class OpenRouterClient {
     span.setAttribute(ATTR_GEN_AI_SYSTEM, "openrouter");
     span.setAttribute(ATTR_GEN_AI_OPERATION_NAME, "chat");
     span.setAttribute("gen_ai.request.model", CHAT_MODEL);
+    span.setAttribute("openinference.span.kind", "LLM");
+    span.setAttribute("gen_ai.request.input", JSON.stringify(messages).slice(0, 30_000));
 
     try {
       const res = await context.with(trace.setSpan(parentCtx, span), async () => {
@@ -263,6 +267,8 @@ export class OpenRouterClient {
           usage?: { total_tokens?: number };
         };
         const content = data.choices?.[0]?.message?.content ?? "";
+        span.setAttribute("gen_ai.response.text", content.slice(0, 30_000));
+        span.setAttribute("gen_ai.usage.total_tokens", data.usage?.total_tokens ?? 0);
         return { content, tokensUsed: data.usage?.total_tokens ?? 0 };
       });
       return res;

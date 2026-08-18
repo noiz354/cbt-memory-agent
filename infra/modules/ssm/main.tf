@@ -99,6 +99,30 @@ resource "aws_ssm_parameter" "grafana_otlp_headers" {
   }
 }
 
+resource "aws_ssm_parameter" "phoenix_otlp_endpoint" {
+  count       = var.phoenix_otlp_endpoint != "" ? 1 : 0
+  name        = "/${var.environment}/phoenix/otlp-endpoint"
+  description = "Arize Phoenix OTLP endpoint (self-hosted EC2, HTTP di port UI)"
+  type        = "String"
+  value       = var.phoenix_otlp_endpoint
+
+  tags = {
+    Name = "Phoenix OTLP Endpoint"
+  }
+}
+
+resource "aws_ssm_parameter" "phoenix_otlp_headers" {
+  count       = var.phoenix_otlp_headers != "" ? 1 : 0
+  name        = "/${var.environment}/phoenix/otlp-headers"
+  description = "Arize Phoenix OTLP auth headers (Authorization=Bearer <system-api-key>)"
+  type        = "SecureString"
+  value       = var.phoenix_otlp_headers
+
+  tags = {
+    Name = "Phoenix OTLP Headers"
+  }
+}
+
 # Generate random pepper if not provided
 resource "random_password" "pepper" {
   length  = 32

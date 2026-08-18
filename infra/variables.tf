@@ -86,6 +86,19 @@ variable "grafana_otlp_headers" {
   default     = ""
 }
 
+variable "phoenix_otlp_endpoint" {
+  description = "Arize Phoenix OTLP endpoint (self-hosted EC2, HTTP di port UI 6006). Kosong = Phoenix dinonaktifkan."
+  type        = string
+  default     = ""
+}
+
+variable "phoenix_otlp_headers" {
+  description = "Arize Phoenix OTLP auth headers (Authorization=Bearer <system-api-key>)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 variable "email_from" {
   description = "From address for magic-link emails"
   type        = string

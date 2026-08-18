@@ -145,6 +145,8 @@ export async function handleChatTurn(
         span.setAttribute("gen_ai.operation.name", "chat");
         span.setAttribute("gen_ai.request.model", "openrouter/free");
         span.setAttribute("gen_ai.request.max_tokens", 1024);
+        span.setAttribute("openinference.span.kind", "LLM");
+        span.setAttribute("gen_ai.request.input", JSON.stringify(messages).slice(0, 30_000));
 
         const stream = llm.streamChat(messages);
         let content = "";
@@ -158,6 +160,7 @@ export async function handleChatTurn(
           content += value;
         }
         span.setAttribute("gen_ai.usage.output_tokens", tokens);
+        span.setAttribute("gen_ai.response.text", content.slice(0, 30_000));
         return { content, tokens };
       },
       { attributes: { "gen_ai.operation.name": "chat", "gen_ai.request.model": "openrouter/free" } },

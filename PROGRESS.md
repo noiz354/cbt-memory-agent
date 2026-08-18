@@ -444,3 +444,16 @@ Standardisasi penanganan error full-stack: satu taxonomy + envelope + choke poin
 - [x] **Verifikasi** — `terraform fmt` + `validate` ✓; `terraform plan` (profile aws-x-cdb): 3 changes = role_policy (+2 action) + bucket_policy frontend (canonize benign, OAC EWWRSYJJMZAO9 tetap) + lambda re-publish (deploy kode Bug-3 dari commit `5662b27`); CORS config = `no-op`.
 - [ ] **Post-deploy verifikasi CI** — setelah push, CI apply harus green; cek health endpoint (mapping `llm.quota_exhausted`) + header CSP/CORS CloudFront masih benar.
 - **Catatan** — `infra/terraform.tfvars` TIDAK dikomit (berisi secret: CRDB conn, OpenRouter, Resend, Grafana).
+
+## Arize Phoenix — dual-sink LLM observability (2026-08-18)
+
+**Tujuan**: trace LLM (prompt/response, token, latency) bisa di-debug di UI Phoenix tanpa prompt bocor ke dashboard perusahaan (Grafana). Lihat `docs/PHOENIX-OBSERVABILITY.md` untuk arsitektur, verifikasi, dan lifecycle.
+
+- [x] **Probe OTLP langsung** — bukti end-to-end: endpoint `http://15.232.121.137:6006/v1/traces` + `Authorization=Bearer <system-api-key>` + payload **protobuf** diterima (`probe.phoenix` span); UI HTTP 200; tanpa auth → 401. **Temuan kunci**: Phoenix menolak OTLP JSON (`415`) → wajib exporter protobuf.
+- [x] **Dep** (`lambda/package.json`) — `@opentelemetry/exporter-trace-otlp-proto@^0.221.0` (HTTP+protobuf untuk jalur Phoenix).
+- [x] **Dual-sink** (`lambda/lib/telemetry.ts`) — 2 BatchSpanProcessor: Grafana (HTTP/JSON) dibungkus **`StrippingExporter`** (atribut payload LLM `gen_ai.request.*`/`response.*`/`input.value`/`output.value`/`llm.*_messages` DI-STRIP sebelum ke Tempo — governance); Phoenix (HTTP/protobuf) dengan payload penuh, hanya aktif jika `PHOENIX_OTLP_ENDPOINT`+`PHOENIX_OTLP_HEADERS` diset.
+- [x] **OpenInference attrs** — `openrouter.ts` chat(): `span.kind=LLM`, `gen_ai.request.input`, `gen_ai.response.text`, usage; embedding(): `span.kind=EMBEDDING`, `input.value`; `chatTurn.ts` stream: `span.kind=LLM`, input/response. Sanitizer: payload LLM boleh sampai 32 KB (bukan 512 B), redaksi UUID + denylist tetap berlaku. TDD 6 test baru (parseOtlpHeaders + sanitizer payload).
+- [x] **Infra** — `variables.tf` + `root.tf` + `modules/ssm` (params `/hackathon/phoenix/otlp-*`, count=0 jika kosong) + `modules/lambda` (data SSM conditional + env Lambda) + `deploy.yml` TF_VAR → GH secrets `PHOENIX_OTLP_ENDPOINT`/`PHOENIX_OTLP_HEADERS`; `.env`+`terraform.tfvars` (git-ignored) diisi key Bearer.
+- [x] **Verifikasi lokal** — typecheck ✓, lambda test **178/178** ✓, zip 312K ✓, `terraform fmt`+`validate` ✓, `plan` = **2 add (SSM phoenix) + 2 change (lambda re-publish + bucket_policy canonize benign), CORS = no-op** ✓.
+- [ ] **Ship** — commit + push → CI apply → panggil LLM 1x → cek span `llm.openrouter`/`llm.embedding` di UI Phoenix (input/output + token) + Tempo (span sama TANPA payload prompt).
+- **Catatan lifecycle EC2** — auto-stop **23:00** WIB, auto-terminate mulai **2026-08-23**, IP **ephemeral** (no EIP) → jika instance restart dengan IP baru, wajib update `PHOENIX_OTLP_ENDPOINT` (SSM + secret GH + tfvars) + re-deploy.

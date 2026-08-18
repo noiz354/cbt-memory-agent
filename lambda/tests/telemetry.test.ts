@@ -9,7 +9,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { sanitizeAttributes, statusClass, normalizeRoute } from "../lib/telemetry";
+import { parseOtlpHeaders, sanitizeAttributes, statusClass, normalizeRoute } from "../lib/telemetry";
 
 describe("sanitizeAttributes", () => {
   it("drops sensitive keys entirely", () => {
@@ -45,6 +45,41 @@ describe("sanitizeAttributes", () => {
   it("drops undefined values", () => {
     const out = sanitizeAttributes({ a: undefined, b: "x" });
     expect(out).toEqual({ b: "x" });
+  });
+
+  it("allows long LLM payload attributes (prompt/response) up to a larger cap", () => {
+    const prompt = "x".repeat(20_000);
+    const out = sanitizeAttributes({ "gen_ai.request.input": prompt });
+    expect(out["gen_ai.request.input"]).toBe(prompt);
+  });
+
+  it("still drops long non-payload attributes", () => {
+    const big = "x".repeat(600);
+    const out = sanitizeAttributes({ "http.request.body": big });
+    expect(out).toEqual({});
+  });
+
+  it("redacts UUIDs inside long LLM payload text", () => {
+    const uuid = "123e4567-e89b-12d3-a456-426614174000";
+    const out = sanitizeAttributes({ "gen_ai.response.text": `payload ${uuid} end` });
+    expect(out["gen_ai.response.text"]).toBe("payload <redacted> end");
+  });
+});
+
+describe("parseOtlpHeaders", () => {
+  it("parses a single Authorization header value containing =", () => {
+    const out = parseOtlpHeaders("Authorization=Bearer eyJhbGciOiJIUzI1NiJ9.signature");
+    expect(out).toEqual({ Authorization: "Bearer eyJhbGciOiJIUzI1NiJ9.signature" });
+  });
+
+  it("parses multiple comma-separated headers", () => {
+    const out = parseOtlpHeaders("Authorization=Bearer abc, X-Env=prod, X-Empty=");
+    expect(out).toEqual({ Authorization: "Bearer abc", "X-Env": "prod" });
+  });
+
+  it("skips malformed pairs", () => {
+    const out = parseOtlpHeaders("=novalue, X-Env=prod");
+    expect(out).toEqual({ "X-Env": "prod" });
   });
 });
 

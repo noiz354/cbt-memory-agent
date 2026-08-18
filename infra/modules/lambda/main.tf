@@ -29,6 +29,16 @@ data "aws_ssm_parameter" "grafana_otlp_headers" {
   name = "/${var.environment}/grafana/otlp-headers"
 }
 
+data "aws_ssm_parameter" "phoenix_otlp_endpoint" {
+  count = var.phoenix_otlp_endpoint != "" ? 1 : 0
+  name  = "/${var.environment}/phoenix/otlp-endpoint"
+}
+
+data "aws_ssm_parameter" "phoenix_otlp_headers" {
+  count = var.phoenix_otlp_headers != "" ? 1 : 0
+  name  = "/${var.environment}/phoenix/otlp-headers"
+}
+
 resource "aws_lambda_function" "this" {
   function_name = var.function_name
   description   = "CBT Memory Agent API — CockroachDB x AWS Hackathon 2026"
@@ -60,6 +70,8 @@ resource "aws_lambda_function" "this" {
       OTEL_SERVICE_NAME           = "cbt-memory-agent-backend"
       OTEL_EXPORTER_OTLP_ENDPOINT = data.aws_ssm_parameter.grafana_otlp_endpoint.value
       OTEL_EXPORTER_OTLP_HEADERS  = data.aws_ssm_parameter.grafana_otlp_headers.value
+      PHOENIX_OTLP_ENDPOINT       = try(data.aws_ssm_parameter.phoenix_otlp_endpoint[0].value, "")
+      PHOENIX_OTLP_HEADERS        = try(data.aws_ssm_parameter.phoenix_otlp_headers[0].value, "")
     }
   }
 

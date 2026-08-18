@@ -14,6 +14,8 @@ module "ssm" {
   resend_api_key        = var.resend_api_key
   grafana_otlp_endpoint = var.grafana_otlp_endpoint
   grafana_otlp_headers  = var.grafana_otlp_headers
+  phoenix_otlp_endpoint = var.phoenix_otlp_endpoint
+  phoenix_otlp_headers  = var.phoenix_otlp_headers
 }
 
 # IAM
@@ -41,6 +43,8 @@ module "lambda" {
   app_url                 = var.app_url
   memory_size             = var.memory_size
   timeout                 = var.timeout
+  phoenix_otlp_endpoint   = var.phoenix_otlp_endpoint
+  phoenix_otlp_headers    = var.phoenix_otlp_headers
 
   # module.oidc: role-policy CI diperbarui di-sequencing SEBELUM panggilan
   # S3 CORS di apply yang sama (hindari IAM-propagation race di CI).

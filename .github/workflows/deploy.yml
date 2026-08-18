@@ -93,6 +93,8 @@ jobs:
           TF_VAR_allowed_origin: ${{ secrets.ALLOWED_ORIGIN }}
           TF_VAR_grafana_otlp_endpoint: ${{ secrets.GRAFANA_OTLP_ENDPOINT }}
           TF_VAR_grafana_otlp_headers: ${{ secrets.GRAFANA_OTLP_HEADERS }}
+          TF_VAR_phoenix_otlp_endpoint: ${{ secrets.PHOENIX_OTLP_ENDPOINT }}
+          TF_VAR_phoenix_otlp_headers: ${{ secrets.PHOENIX_OTLP_HEADERS }}
 
       - name: Deploy frontend (S3 + CloudFront)
         run: bash scripts/deploy-frontend.sh
