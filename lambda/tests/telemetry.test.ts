@@ -9,7 +9,13 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { parseOtlpHeaders, sanitizeAttributes, statusClass, normalizeRoute } from "../lib/telemetry";
+import {
+  parseOtlpHeaders,
+  sanitizeAttributes,
+  statusClass,
+  normalizeRoute,
+  StrippingExporter,
+} from "../lib/telemetry";
 
 describe("sanitizeAttributes", () => {
   it("drops sensitive keys entirely", () => {
@@ -109,5 +115,81 @@ describe("normalizeRoute", () => {
   it("leaves plain routes unchanged", () => {
     expect(normalizeRoute("/api/v1/health")).toBe("/api/v1/health");
     expect(normalizeRoute("/api/v1/chat/turn")).toBe("/api/v1/chat/turn");
+  });
+});
+
+/**
+ * Mimes struktur runtime SpanImpl dari @opentelemetry/sdk-trace:
+ * `attributes`, `status`, `startTime`, `endTime`, `name`, `kind` = field own
+ * enumerable; `spanContext()` = method di class prototype (bukan own property).
+ * Regression guard: StrippingExporter tidak boleh membuang prototype via spread,
+ * karena otlp-transformer memanggil `span.spanContext()` (internal.js:21).
+ */
+class FakeReadableSpan {
+  attributes: Record<string, unknown>;
+  status = { code: 1 };
+  startTime = [0, 0];
+  endTime = [0, 0];
+  name = "fake.span";
+  kind = 2;
+  private _spanContext = { traceId: "aaa", spanId: "bbb", traceFlags: 1 };
+
+  constructor(attributes: Record<string, unknown>) {
+    this.attributes = attributes;
+  }
+
+  spanContext() {
+    return this._spanContext;
+  }
+}
+
+function captureExport(batch: unknown[]): StrippingExporter {
+  const inner = {
+    export(
+      spans: import("@opentelemetry/sdk-trace-base").ReadableSpan[],
+      cb: (result: import("@opentelemetry/core").ExportResult) => void,
+    ) {
+      batch.push(...(spans as unknown[]));
+      cb({ code: 0 });
+    },
+    async shutdown() {},
+  };
+  return new StrippingExporter(inner, (key) => /^(gen_ai\.(request|response)\.|input\.value|output\.value)/.test(key));
+}
+
+describe("StrippingExporter", () => {
+  it("preserves the span prototype so spanContext() survives to the inner exporter", () => {
+    const received: unknown[] = [];
+    const exporter = captureExport(received);
+    const span = new FakeReadableSpan({ "gen_ai.request.input": "prompt" });
+    exporter.export([span as unknown as import("@opentelemetry/sdk-trace-base").ReadableSpan], () => {});
+    expect(received).toHaveLength(1);
+    const out = received[0] as FakeReadableSpan;
+    expect(typeof out.spanContext).toBe("function");
+    expect(out.spanContext()).toEqual({ traceId: "aaa", spanId: "bbb", traceFlags: 1 });
+    expect(typeof out.status).toBe("object");
+  });
+
+  it("strips LLM payload attributes but keeps the rest", () => {
+    const received: unknown[] = [];
+    const exporter = captureExport(received);
+    const span = new FakeReadableSpan({
+      "gen_ai.request.input": "prompt",
+      "gen_ai.response.text": "reply",
+      "input.value": "nested prompt",
+      "openinference.span.kind": "LLM",
+      "db.operation": "select",
+    });
+    exporter.export([span as unknown as import("@opentelemetry/sdk-trace-base").ReadableSpan], () => {});
+    const out = received[0] as { attributes: Record<string, unknown> };
+    expect(out.attributes).toEqual({ "openinference.span.kind": "LLM", "db.operation": "select" });
+  });
+
+  it("does not mutate the source span attributes (safe for the Phoenix sink)", () => {
+    const received: unknown[] = [];
+    const exporter = captureExport(received);
+    const span = new FakeReadableSpan({ "gen_ai.request.input": "prompt", ok: "keep" });
+    exporter.export([span as unknown as import("@opentelemetry/sdk-trace-base").ReadableSpan], () => {});
+    expect(span.attributes).toEqual({ "gen_ai.request.input": "prompt", ok: "keep" });
   });
 });

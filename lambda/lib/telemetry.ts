@@ -87,7 +87,7 @@ export function parseOtlpHeaders(raw: string): Record<string, string> {
  * Dipakai membungkus exporter Grafana sehingga dual-sink tetap mengirim span
  * yang sama, namun versi ke Grafana bebas prompt/response (governance).
  */
-class StrippingExporter {
+export class StrippingExporter {
   constructor(
     private readonly inner: import("@opentelemetry/sdk-trace-base").SpanExporter,
     private readonly stripper: (key: string) => boolean,
@@ -102,7 +102,12 @@ class StrippingExporter {
       for (const key of Object.keys(attributes)) {
         if (this.stripper(key)) delete attributes[key];
       }
-      return { ...span, attributes };
+      const clone = Object.assign(
+        Object.create(Object.getPrototypeOf(span)),
+        span,
+        { attributes },
+      );
+      return clone;
     });
     return this.inner.export(cleaned, resultCallback);
   }
