@@ -3,14 +3,17 @@
  *
  * Frontend browser OTLP spans tidak bisa ekspor langsung ke Grafana karena token
  * tidak boleh bocor ke bundle browser. Endpoint ini menerima raw body OTLP dari
- * browser, lalu meneruskan (passthrough) ke Grafana Cloud OTLP gateway.
+ * browser, lalu meneruskan (fan-out) ke Grafana Cloud OTLP gateway (wajib) dan
+ * Arize Phoenix (opsional, LLM observability).
  *
  * Alur:
  *   1. Auth middleware (handler.ts) sudah memvalidasi token + device.
- *   2. Terima body + Content-Type apa adanya.
- *   3. POST body yang sama ke `${OTLP_ENDPOINT}/v1/traces` dengan header
- *      Authorization dari env (server-side, tidak pernah terekspos ke browser).
- *   4. Return status upstream; gagal → 502 (bukan crash).
+ *   2. Terima body + Content-Type apa adanya (browser kini mengirim protobuf).
+ *   3. POST body yang sama (byte-identik) ke `${OTLP_ENDPOINT}/v1/traces` dan
+ *      `${PHOENIX_OTLP_ENDPOINT}/v1/traces` dengan header dari env (server-side,
+ *      tidak pernah terekspos ke browser).
+ *   4. Grafana = sink wajib: gagal → 502 (bukan crash). Phoenix = opsional:
+ *      gagal sendirian hanya dilaporkan, browser tetap mendapat 200.
  */
 
 import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
@@ -65,39 +68,71 @@ export async function handleTelemetryRelay(
   const payload = isBase64 ? Buffer.from(body, "base64") : Buffer.from(body, "utf8");
   const contentType = event.headers?.["Content-Type"] ?? event.headers?.["content-type"] ?? "application/x-protobuf";
 
-  try {
-    const res = await fetch(`${endpoint.replace(/\/$/, "")}/v1/traces`, {
-      method: "POST",
-      headers: {
-        ...parseKeyValueHeaders(authHeader),
-        "Content-Type": contentType,
-      },
-      body: payload,
-    });
+  // Fan-out ke beberapa sink:
+  //   1. Grafana Tempo — wajib (ops umum). Gagal → 502 seperti sebelumnya.
+  //   2. Arize Phoenix — opsional (LLM observability). Browser TIDAK boleh gagal
+  //      hanya karena Phoenix down → kegagalan Phoenix dilaporkan tapi 200 tetap.
+  // Sink menerima BYTES yang sama (browser kini mengirim protobuf, yang diterima
+  // Phoenix; JSON hanya diterima Grafana versi HTTP).
+  const failures: string[] = [];
 
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      reportError(new AppError("dependency.telemetry_unavailable", { message: `telemetry upstream ${res.status}`, cause: text.slice(0, 200) }));
-      return {
-        statusCode: 502,
-        headers: relayCors(),
-        body: JSON.stringify(errorEnvelope(new AppError("dependency.telemetry_unavailable"))),
-      };
-    }
+  const grafanaOk = await forwardSink(
+    `${endpoint.replace(/\/$/, "")}/v1/traces`,
+    parseKeyValueHeaders(authHeader),
+    payload,
+    contentType,
+  );
+  if (!grafanaOk) failures.push("grafana");
 
-    logger.info("telemetry.export_ok", "OTLP export 200/OK");
-    return {
-      statusCode: 200,
-      headers: relayCors(),
-      body: "",
-    };
-  } catch (err) {
-    reportError(new AppError("dependency.telemetry_unavailable", { cause: err }));
+  const phoenixEndpoint = process.env.PHOENIX_OTLP_ENDPOINT;
+  const phoenixHeaders = process.env.PHOENIX_OTLP_HEADERS;
+  if (phoenixEndpoint && phoenixHeaders) {
+    const phoenixOk = await forwardSink(
+      `${phoenixEndpoint.replace(/\/$/, "")}/v1/traces`,
+      parseKeyValueHeaders(phoenixHeaders),
+      payload,
+      contentType,
+    );
+    if (!phoenixOk) failures.push("phoenix");
+  }
+
+  const failed = failures.includes("grafana");
+  if (failed) {
+    reportError(new AppError("dependency.telemetry_unavailable", { message: "telemetry upstream grafana failed" }));
     return {
       statusCode: 502,
       headers: relayCors(),
       body: JSON.stringify(errorEnvelope(new AppError("dependency.telemetry_unavailable"))),
     };
+  }
+
+  if (failures.includes("phoenix")) {
+    reportError(new AppError("dependency.phoenix_unavailable", { message: "phoenix upstream failed" }));
+  }
+
+  logger.info("telemetry.export_ok", "OTLP export 200/OK");
+  return {
+    statusCode: 200,
+    headers: relayCors(),
+    body: "",
+  };
+}
+
+async function forwardSink(
+  url: string,
+  headers: Record<string, string>,
+  payload: Buffer,
+  contentType: string,
+): Promise<boolean> {
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { ...headers, "Content-Type": contentType },
+      body: payload,
+    });
+    return res.ok;
+  } catch {
+    return false;
   }
 }
 

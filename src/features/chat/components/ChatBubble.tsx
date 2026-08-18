@@ -1,5 +1,5 @@
 import { ChatMarkdown } from "@/features/chat/lib/markdown";
-import type { ChatMessage } from "@/features/chat/types";
+import type { ChatAttachment, ChatMessage } from "@/features/chat/types";
 import { useChatStore } from "@/features/chat/store/chatStore";
 import { cn } from "@/shared/lib/cn";
 import { formatClock } from "@/shared/lib/format";
@@ -8,8 +8,11 @@ import { useDraggable } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
 import { motion } from "framer-motion";
 import { FileText, GripVertical, ImageIcon, Mic, Quote, Sparkles, Video, Volume2 } from "lucide-react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { WaveformScrubber } from "./WaveformScrubber";
+import { AttachmentViewer } from "./AttachmentViewer";
+import { formatModelLabel } from "@/features/chat/lib/modelSelection";
 
 const DISTORTIONS = [
   "catastrophizing",
@@ -28,6 +31,7 @@ export function ChatBubble({ message }: ChatBubbleProps) {
   const isSystem = message.role === "system";
   const triggerBargeIn = useChatStore((s) => s.triggerBargeIn);
   const setQuote = useChatStore((s) => s.setQuote);
+  const [viewing, setViewing] = useState<ChatAttachment | null>(null);
 
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `bubble:${message.id}`,
@@ -133,11 +137,13 @@ export function ChatBubble({ message }: ChatBubbleProps) {
         )}
 
         {message.attachments?.map((file) => (
-          <div
+          <button
+            type="button"
             key={file.id}
+            onClick={() => setViewing(file)}
             className={cn(
-              "mb-2 flex items-center gap-2 rounded-xl px-3 py-2 text-sm",
-              isUser ? "bg-white/10" : "bg-canvas",
+              "mb-2 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm transition-colors",
+              isUser ? "bg-white/10 hover:bg-white/15" : "bg-canvas hover:bg-ink/5",
             )}
           >
             {file.kind === "image" && file.previewUrl ? (
@@ -155,13 +161,13 @@ export function ChatBubble({ message }: ChatBubbleProps) {
             ) : (
               <FileText className="size-4 text-teal" />
             )}
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <p className="truncate font-medium">{file.name}</p>
               <p className={cn("text-xs", isUser ? "text-white/60" : "text-ink-mute")}>
-                {file.kind.toUpperCase()} · {file.sizeLabel} · on-device
+                {file.kind.toUpperCase()} · {file.sizeLabel} · tap to open
               </p>
             </div>
-          </div>
+          </button>
         ))}
 
         {isUser ? (
@@ -203,7 +209,17 @@ export function ChatBubble({ message }: ChatBubbleProps) {
         )}
 
         <footer className="mt-2 flex items-center justify-between gap-3 text-[11px] opacity-70">
-          <time dateTime={message.createdAt}>{formatClock(message.createdAt)}</time>
+          <div className="flex min-w-0 items-center gap-2">
+            <time dateTime={message.createdAt}>{formatClock(message.createdAt)}</time>
+            {!isUser && !isSystem && message.model && (
+              <span
+                className="truncate rounded-full bg-teal-mist px-2 py-0.5 font-semibold text-teal"
+                title={message.model}
+              >
+                {formatModelLabel(message.providerId, message.model)}
+              </span>
+            )}
+          </div>
           {!isUser && !isSystem && (
             <div className="flex items-center gap-3">
               <button
@@ -232,6 +248,8 @@ export function ChatBubble({ message }: ChatBubbleProps) {
           )}
         </footer>
       </div>
+
+      {viewing && <AttachmentViewer attachment={viewing} onClose={() => setViewing(null)} />}
     </motion.article>
   );
 }

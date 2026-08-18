@@ -323,3 +323,57 @@ export async function handleDeleteAttachment(
     };
   }
 }
+
+/**
+ * GET /api/v1/attachments/:id/media — presign download raw media milik user
+ * untuk attachment viewer (video/audio/gambar/pdf/txt). Tidak pernah melempar
+ * bytes lewat API Gateway; hanya mengembalikan presigned GET URL (expiry 1 jam)
+ * + tipe MIME + kind untuk render yang benar di klien.
+ *
+ * Keamanan: lookup dibatasi owner (WHERE memory_node_id::string = $1 AND
+ * user_id = $2) sehingga user TIDAK bisa mengambil media milik orang lain.
+ */
+export async function handleGetAttachmentMedia(
+  id: string,
+  crdb: CrdbClient,
+  s3: S3ClientService,
+  token: string,
+  deviceId: string,
+): Promise<APIGatewayProxyResult> {
+  try {
+    const userId = await getUserId(crdb, token);
+
+    const row = await crdb.queryOne<{
+      s3_key: string | null;
+      mime_type: string | null;
+      kind: string;
+    }>(
+      `SELECT a.s3_key, a.mime_type, a.kind FROM attachments a
+       WHERE a.memory_node_id::string = $1 AND a.user_id = $2::uuid`,
+      [id, userId],
+    );
+    if (!row || !row.s3_key) {
+      return { statusCode: 404, headers: CORS, body: JSON.stringify(errorEnvelope(new AppError("media.not_found"))) };
+    }
+
+    const url = await s3.presignMediaDownload(row.s3_key);
+
+    return {
+      statusCode: 200,
+      headers: CORS,
+      body: JSON.stringify({
+        v: 1,
+        url,
+        mime: row.mime_type ?? undefined,
+        kind: row.kind,
+      }),
+    };
+  } catch (err) {
+    const appErr = reportError(err);
+    return {
+      statusCode: appErr.statusCode,
+      headers: CORS,
+      body: JSON.stringify(errorEnvelope(appErr)),
+    };
+  }
+}

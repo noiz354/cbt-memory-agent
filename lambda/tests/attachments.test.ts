@@ -13,6 +13,7 @@ import {
   handleCreateAttachment,
   handleListAttachments,
   handleDeleteAttachment,
+  handleGetAttachmentMedia,
 } from "../handlers/attachments";
 import { MAX_MEDIA_UPLOAD_BYTES } from "../lib/s3";
 import { toVectorLiteral } from "../lib/vectors";
@@ -51,6 +52,7 @@ function s3Mock() {
       fields: { key: "media/key", "x-amz-algorithm": "AWS4-HMAC-SHA256" },
     })),
     headMediaObject: vi.fn(async () => ({ exists: true, sizeBytes: 2048 })),
+    presignMediaDownload: vi.fn(async () => "https://s3.example/media/get"),
     deleteMediaObject: vi.fn(async () => undefined),
     deleteMediaPrefix: vi.fn(async () => 3),
     uploadExport: vi.fn(async () => "https://s3.example/export"),
@@ -412,6 +414,63 @@ describe("attachments — delete", () => {
     const res = await handleDeleteAttachment("a1", crdb, s3, "tok-1", "dev-1");
     expect(res.statusCode).toBe(404);
     expect(s3.deleteMediaObject).not.toHaveBeenCalled();
+  });
+});
+
+describe("attachments — get media (viewer)", () => {
+  it("returns a presigned GET url + mime + kind for the user's own attachment", async () => {
+    const crdb = crdbMock();
+    crdb.queryOne = vi
+      .fn()
+      .mockResolvedValueOnce({ user_id: USER }) // getUserId
+      .mockResolvedValueOnce({
+        s3_key: `media/${USER}/abc.jpg`,
+        mime_type: "image/jpeg",
+        kind: "image",
+      });
+    const s3 = s3Mock();
+    const res = await handleGetAttachmentMedia("att-1", crdb, s3, "tok-1", "dev-1");
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.url).toBe("https://s3.example/media/get");
+    expect(body.mime).toBe("image/jpeg");
+    expect(body.kind).toBe("image");
+    expect(s3.presignMediaDownload).toHaveBeenCalledWith(`media/${USER}/abc.jpg`);
+  });
+
+  it("scopes the lookup to the owning user (WHERE a.user_id = $2) — no cross-user leak", async () => {
+    const crdb = crdbMock();
+    crdb.queryOne = vi
+      .fn()
+      .mockResolvedValueOnce({ user_id: USER })
+      .mockResolvedValueOnce({ s3_key: `media/${USER}/abc.jpg`, mime_type: "video/webm", kind: "video" });
+    const s3 = s3Mock();
+    await handleGetAttachmentMedia("att-1", crdb, s3, "tok-1", "dev-1");
+    const calls = (crdb.queryOne as ReturnType<typeof vi.fn>).mock.calls;
+    const lookup = calls[calls.length - 1];
+    expect(String(lookup[0])).toContain("user_id = $2");
+    expect(lookup[1]).toEqual(["att-1", USER]);
+  });
+
+  it("returns 404 when attachment not found (foreign or deleted)", async () => {
+    const crdb = crdbMock();
+    crdb.queryOne = vi.fn().mockResolvedValueOnce({ user_id: USER }).mockResolvedValueOnce(undefined);
+    const s3 = s3Mock();
+    const res = await handleGetAttachmentMedia("nope", crdb, s3, "tok-1", "dev-1");
+    expect(res.statusCode).toBe(404);
+    expect(s3.presignMediaDownload).not.toHaveBeenCalled();
+  });
+
+  it("returns 500 when presigning fails (e.g. missing S3 object)", async () => {
+    const crdb = crdbMock();
+    crdb.queryOne = vi
+      .fn()
+      .mockResolvedValueOnce({ user_id: USER })
+      .mockResolvedValueOnce({ s3_key: `media/${USER}/ghost.webm`, mime_type: "video/webm", kind: "video" });
+    const s3 = s3Mock();
+    s3.presignMediaDownload = vi.fn(async () => { throw new Error("NoSuchKey"); });
+    const res = await handleGetAttachmentMedia("att-1", crdb, s3, "tok-1", "dev-1");
+    expect(res.statusCode).toBe(500);
   });
 });
 

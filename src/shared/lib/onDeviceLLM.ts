@@ -72,6 +72,7 @@ export async function generateOnDevice(
       span.setAttribute("gen_ai.provider", "webllm");
       span.setAttribute("gen_ai.request.model", MODEL_ID);
       span.setAttribute("gen_ai.request.temperature", 0.7);
+      span.setAttribute("openinference.span.kind", "LLM");
 
       const completion = await e.chat.completions.create({
         messages: messages as webllm.ChatCompletionMessageParam[],
@@ -98,12 +99,14 @@ export async function generateOnDevice(
           .choices?.[0]?.message?.content ?? "";
         span.setAttribute("gen_ai.usage.output_tokens", usage?.completion_tokens ?? 0);
         span.setAttribute("gen_ai.response.model", MODEL_ID);
+        span.setAttribute("gen_ai.response.text", fullContent);
         return { content: fullContent, tokensUsed: usage?.completion_tokens ?? 0 };
       }
 
       span.setAttribute("gen_ai.response.model", MODEL_ID);
+      span.setAttribute("gen_ai.response.text", fullContent);
       return { content: fullContent, tokensUsed: 0 };
     },
-    { attributes: { "gen_ai.usage.input_tokens": messages.length } },
+    { attributes: { "gen_ai.usage.input_tokens": messages.length, "gen_ai.request.input": JSON.stringify(messages) } },
   );
 }

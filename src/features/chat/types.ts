@@ -8,6 +8,8 @@ export interface ChatAttachment {
   name: string;
   sizeLabel: string;
   previewUrl?: string;
+  /** Backend attachment id (memory node id) when this media is persisted in S3. */
+  mediaId?: string;
 }
 
 export interface InjectedMemory {
@@ -31,6 +33,10 @@ export interface ChatMessage {
   recalledMemoryIds?: string[];
   /** Titles of the memories the backend recalled for this turn (SSE final event). */
   recalledTitles?: string[];
+  /** Provider id that actually generated this response (label chip). */
+  providerId?: string;
+  /** Model id that actually generated this response (label chip). */
+  model?: string;
   audio?: {
     durationMs: number;
     peaks: number[];

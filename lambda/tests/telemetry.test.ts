@@ -8,7 +8,7 @@
  *   3. normalizeRoute: segmen UUID diganti ':id' (kontrol cardinality metric).
  */
 
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   parseOtlpHeaders,
   sanitizeAttributes,
@@ -16,6 +16,7 @@ import {
   normalizeRoute,
   StrippingExporter,
 } from "../lib/telemetry";
+import { handleTelemetryRelay } from "../handlers/telemetry";
 
 describe("sanitizeAttributes", () => {
   it("drops sensitive keys entirely", () => {
@@ -193,3 +194,115 @@ describe("StrippingExporter", () => {
     expect(span.attributes).toEqual({ "gen_ai.request.input": "prompt", ok: "keep" });
   });
 });
+
+// ─────────────────────────────────────────────
+// handleTelemetryRelay — browser OTLP fan-out → Grafana + Phoenix
+// ─────────────────────────────────────────────
+
+interface RelayTestEnv {
+  grafana?: string;
+  grafanaHeaders?: string;
+  phoenix?: string;
+  phoenixHeaders?: string;
+}
+
+function setEnv(env: RelayTestEnv): void {
+  if (env.grafana) process.env.OTEL_EXPORTER_OTLP_ENDPOINT = env.grafana;
+  else delete process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
+  if (env.grafanaHeaders) process.env.OTEL_EXPORTER_OTLP_HEADERS = env.grafanaHeaders;
+  else delete process.env.OTEL_EXPORTER_OTLP_HEADERS;
+  if (env.phoenix) process.env.PHOENIX_OTLP_ENDPOINT = env.phoenix;
+  else delete process.env.PHOENIX_OTLP_ENDPOINT;
+  if (env.phoenixHeaders) process.env.PHOENIX_OTLP_HEADERS = env.phoenixHeaders;
+  else delete process.env.PHOENIX_OTLP_HEADERS;
+}
+
+function okResponse(status = 200): Response {
+  return new Response(null, { status });
+}
+
+describe("handleTelemetryRelay", () => {
+  const fetchMock = vi.fn();
+
+  beforeEach(() => {
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValue(okResponse(200));
+    setEnv({
+      grafana: "https://grafana-otlp.example",
+      grafanaHeaders: "Authorization=Basic Z3JhZmFuYQ==",
+      phoenix: "http://10.0.0.5:6006",
+      phoenixHeaders: "Authorization=Bearer px-key",
+    });
+  });
+
+  afterEach(() => {
+    delete (globalThis as Record<string, unknown>).fetch;
+  });
+
+  function makeEvent(body: string): import("aws-lambda").APIGatewayProxyEvent {
+    return {
+      body,
+      isBase64Encoded: false,
+      headers: { "Content-Type": "application/x-protobuf", Authorization: "Bearer tok", "X-Device-Id": "dev" },
+    } as unknown as import("aws-lambda").APIGatewayProxyEvent;
+  }
+
+  it("forwards the raw payload bytes to BOTH Grafana and Phoenix when Phoenix is configured", async () => {
+    const res = await handleTelemetryRelay(makeEvent("raw-proto-bytes"));
+
+    expect(res.statusCode).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    const calls = fetchMock.mock.calls.map((c) => c[0]);
+    expect(calls).toContain("https://grafana-otlp.example/v1/traces");
+    expect(calls).toContain("http://10.0.0.5:6006/v1/traces");
+
+    for (const [, init] of fetchMock.mock.calls as [string, RequestInit][]) {
+      expect(Buffer.from(init.body as Buffer).toString("utf8")).toBe("raw-proto-bytes");
+    }
+  });
+
+  it("keeps the browser successful (200) even if Phoenix is down, as long as Grafana succeeds", async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (String(url).includes("10.0.0.5")) return Promise.reject(new Error("phoenix unreachable"));
+      return Promise.resolve(okResponse(200));
+    });
+
+    const res = await handleTelemetryRelay(makeEvent("raw-proto-bytes"));
+    expect(res.statusCode).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns 502 when Grafana (required sink) fails upstream", async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (String(url).includes("grafana-otlp")) return Promise.resolve(okResponse(503));
+      return Promise.resolve(okResponse(200));
+    });
+
+    const res = await handleTelemetryRelay(makeEvent("raw-proto-bytes"));
+    expect(res.statusCode).toBe(502);
+  });
+
+  it("returns 502 when Grafana throws", async () => {
+    fetchMock.mockRejectedValue(new Error("network down"));
+    const res = await handleTelemetryRelay(makeEvent("raw-proto-bytes"));
+    expect(res.statusCode).toBe(502);
+  });
+
+  it("POSTs only to Grafana when no Phoenix endpoint is configured", async () => {
+    setEnv({ grafana: "https://grafana-otlp.example", grafanaHeaders: "Authorization=Basic Z3JhZmFuYQ==" });
+    const res = await handleTelemetryRelay(makeEvent("raw-proto-bytes"));
+    expect(res.statusCode).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe("https://grafana-otlp.example/v1/traces");
+  });
+
+  it("fans out the same protobuf Content-Type to both sinks", async () => {
+    await handleTelemetryRelay(makeEvent("bytes"));
+    for (const [, init] of fetchMock.mock.calls as [string, RequestInit][]) {
+      expect((init.headers as Record<string, string>)["Content-Type"]).toBe("application/x-protobuf");
+    }
+  });
+});
+

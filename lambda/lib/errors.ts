@@ -110,6 +110,10 @@ export const ERROR_CODES: Record<string, ErrorCodeDef> = {
     statusCode: 502, category: "dependency", retriable: true, level: "error",
     message: "Telemetry service unavailable",
   },
+  "dependency.phoenix_unavailable": {
+    statusCode: 502, category: "dependency", retriable: true, level: "error",
+    message: "Phoenix observability unavailable",
+  },
 
   // ── media (attachments) ───────────────────────────────────────────────
   "media.presign_failed": {

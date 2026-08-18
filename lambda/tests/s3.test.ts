@@ -16,10 +16,11 @@ const hoisted = vi.hoisted(() => {
     url: "https://s3.example/post",
     fields: { key: "media/u/abc.webm", "x-amz-algorithm": "AWS4-HMAC-SHA256" },
   }));
+  const getSignedUrlMock = vi.fn(async () => "https://s3.example/get");
   class FakeS3Client {
     send = sendMock;
   }
-  return { sendMock, createPresignedPostMock, FakeS3Client };
+  return { sendMock, createPresignedPostMock, getSignedUrlMock, FakeS3Client };
 });
 
 vi.mock("@aws-sdk/client-s3", async (importOriginal) => {
@@ -28,7 +29,7 @@ vi.mock("@aws-sdk/client-s3", async (importOriginal) => {
 });
 
 vi.mock("@aws-sdk/s3-request-presigner", () => ({
-  getSignedUrl: vi.fn(async () => "https://s3.example/get"),
+  getSignedUrl: hoisted.getSignedUrlMock,
 }));
 vi.mock("@aws-sdk/s3-presigned-post", () => ({
   createPresignedPost: hoisted.createPresignedPostMock,
@@ -92,5 +93,25 @@ describe("S3ClientService", () => {
     const head = await s3.headMediaObject("media/u/abc.jpg");
     expect(head.exists).toBe(true);
     expect(head.sizeBytes).toBe(2048);
+  });
+
+  it("presignMediaDownload issues a short-lived GET url for a media key", async () => {
+    const s3 = new S3ClientService("bucket-x");
+    const url = await s3.presignMediaDownload("media/u/abc.webm");
+    expect(url).toBe("https://s3.example/get");
+    const [client, command, opts] = hoisted.getSignedUrlMock.mock.calls[0] as unknown as [
+      unknown,
+      { input: { Bucket: string; Key: string } },
+      { expiresIn: number },
+    ];
+    expect(client).toBeInstanceOf(hoisted.FakeS3Client);
+    expect(command.input).toEqual({ Bucket: "bucket-x", Key: "media/u/abc.webm" });
+    expect(opts.expiresIn).toBe(3600);
+  });
+
+  it("presignMediaDownload leaks no media bytes (only a signed URL)", async () => {
+    const s3 = new S3ClientService("bucket-x");
+    await s3.presignMediaDownload("media/u/secret.webm");
+    expect(hoisted.sendMock).not.toHaveBeenCalled();
   });
 });

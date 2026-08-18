@@ -45,6 +45,7 @@ import {
   handleCreateAttachment,
   handleListAttachments,
   handleDeleteAttachment,
+  handleGetAttachmentMedia,
 } from "./handlers/attachments";
 import { handleMetrics, handleHealth } from "./handlers/health";
 import { handleTelemetryRelay } from "./handlers/telemetry";
@@ -263,6 +264,10 @@ async function route(
   }
   if (method === "GET" && path === "/api/v1/attachments") {
     return await handleListAttachments(crdb, token, deviceId);
+  }
+  if (method === "GET" && path.startsWith("/api/v1/attachments/") && path.endsWith("/media")) {
+    const id = path.split("/").filter(Boolean).at(-2) ?? "";
+    return await handleGetAttachmentMedia(id, crdb, s3, token, deviceId);
   }
   if (method === "DELETE" && path.startsWith("/api/v1/attachments/")) {
     const id = path.split("/").pop()!;

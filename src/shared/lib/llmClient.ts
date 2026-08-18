@@ -16,6 +16,7 @@ import { getApiKey } from "@/shared/lib/byokKeyManager";
 import { getAuthHeaders } from "@/shared/lib/authSession";
 import { notifyUnauthorized, RateLimitError, parseRetryAfterMs, isRateLimitError } from "@/shared/lib/apiClient";
 import { generateOnDevice } from "@/shared/lib/onDeviceLLM";
+import { withSpan } from "@/shared/lib/telemetry";
 
 // ─────────────────────────────────────────────
 // Types
@@ -170,14 +171,25 @@ export async function callLLMWithFallback(
   messages: LLMMessage[],
   onStream?: LLMStreamCallback,
   signal?: AbortSignal,
-  options?: { backendUserText?: string },
+  options?: {
+    backendUserText?: string;
+    /** User-selected provider/model to try FIRST (instead of local-webllm). */
+    preferred?: { providerId: LLMProviderId; modelId: string };
+  },
 ): Promise<LLMResponse> {
-  // 1. Coba on-device (WebLLM)
+  // 0. If the user picked a specific model, honor it as the first attempt —
+  //    not as a hard pin (we still fall back to the chain on failure).
+  const firstAttempt: { providerId: LLMProviderId; modelId: string } =
+    options?.preferred ?? { providerId: "local-webllm", modelId: "Phi-3-mini-4k-instruct-q4f16_1-MLC" };
   try {
-    return await callLLM({ providerId: "local-webllm", messages }, onStream, signal);
+    return await callLLM(
+      { providerId: firstAttempt.providerId, modelId: firstAttempt.modelId, messages },
+      onStream,
+      signal,
+    );
   } catch (err) {
     if (isAbortError(err)) throw err;
-    console.warn("[LLM] On-device failed, trying backend:", err);
+    console.warn(`[LLM] First attempt (${firstAttempt.providerId}/${firstAttempt.modelId}) failed, trying backend:`, err);
   }
 
   // 2. Coba backend proxy
@@ -524,7 +536,27 @@ async function callBYOK(
     throw new Error(`${provider.name} API returned ${response.status}: ${errorText.slice(0, 200)}`);
   }
 
-  return parseChatResponse(response, request.providerId, request.modelId, onStream, started, signal);
+  return withSpan(
+    "llm.byok",
+    async (span) => {
+      span.setAttribute("gen_ai.provider", request.providerId);
+      span.setAttribute("gen_ai.request.model", request.modelId);
+      span.setAttribute("openinference.span.kind", "LLM");
+      span.setAttribute("gen_ai.request.input", JSON.stringify(request.messages));
+      const result = await parseChatResponse(
+        response,
+        request.providerId,
+        request.modelId,
+        onStream,
+        started,
+        signal,
+      );
+      span.setAttribute("gen_ai.response.text", result.content);
+      span.setAttribute("gen_ai.response.model", result.modelId);
+      if (result.tokensUsed != null) span.setAttribute("gen_ai.usage.output_tokens", result.tokensUsed);
+      return result;
+    },
+  );
 }
 
 // ─────────────────────────────────────────────

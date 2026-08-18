@@ -1,10 +1,12 @@
 import { attachmentKindLabel, formatAttachmentTime } from "@/features/memory/lib/attachmentFormat";
 import { useMemoryStore } from "@/features/memory/store/memoryStore";
+import { AttachmentViewer } from "@/features/chat/components/AttachmentViewer";
+import type { ChatAttachment } from "@/features/chat/types";
 import { apiClient, type AttachmentListItem } from "@/shared/lib/apiClient";
 import { getAuthHeaders } from "@/shared/lib/authSession";
 import { toast } from "@/shared/store/toastStore";
 import { Badge } from "@/shared/ui/Badge";
-import { AudioLines, Image, RefreshCw, Trash2, Video } from "lucide-react";
+import { AudioLines, Eye, Image, RefreshCw, Trash2, Video } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
 function KindIcon({ kind }: { kind: AttachmentListItem["kind"] }) {
@@ -23,6 +25,7 @@ export function AttachmentGallery() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [viewing, setViewing] = useState<ChatAttachment | null>(null);
   const hydrate = useMemoryStore((s) => s.hydrate);
 
   const load = useCallback(async () => {
@@ -121,20 +124,40 @@ export function AttachmentGallery() {
                   </p>
                 ) : null}
               </div>
-              <button
-                type="button"
-                aria-label={`Delete ${item.title}`}
-                disabled={deletingId === item.id}
-                onClick={() => void handleDelete(item)}
-                className="inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold text-ink-mute transition-colors hover:bg-danger-mist hover:text-danger disabled:opacity-50"
-              >
-                <Trash2 className="size-3" />
-                {deletingId === item.id ? "Deleting…" : "Delete"}
-              </button>
+              <div className="flex shrink-0 flex-col items-end gap-1">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setViewing({
+                      id: item.id,
+                      kind: item.kind,
+                      name: item.title || item.kind,
+                      sizeLabel: "media",
+                      mediaId: item.id,
+                    })
+                  }
+                  className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold text-teal transition-colors hover:bg-teal-mist"
+                >
+                  <Eye className="size-3" />
+                  Open
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Delete ${item.title}`}
+                  disabled={deletingId === item.id}
+                  onClick={() => void handleDelete(item)}
+                  className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold text-ink-mute transition-colors hover:bg-danger-mist hover:text-danger disabled:opacity-50"
+                >
+                  <Trash2 className="size-3" />
+                  {deletingId === item.id ? "Deleting…" : "Delete"}
+                </button>
+              </div>
             </div>
           ))}
         </div>
       )}
+
+      {viewing && <AttachmentViewer attachment={viewing} onClose={() => setViewing(null)} />}
     </section>
   );
 }

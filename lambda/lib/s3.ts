@@ -91,6 +91,18 @@ export class S3ClientService {
     });
   }
 
+  /**
+   * Presign download raw media object (GetObject) — URL GET dengan expiry
+   * pendek (1 jam). Dipakai attachment viewer untuk stream/putar media yang
+   * sudah di-upload user tanpa mengekspos bucket (klien hanya terima URL).
+   */
+  async presignMediaDownload(key: string): Promise<string> {
+    return this.traced("GetObject", async () => {
+      const command = new GetObjectCommand({ Bucket: this.bucket, Key: key });
+      return getSignedUrl(this.client, command, { expiresIn: 3600 });
+    });
+  }
+
   /** Delete satu object media (raw bytes) dari bucket. */
   async deleteMediaObject(key: string): Promise<void> {
     await this.traced("DeleteObject", async () => {

@@ -6,6 +6,11 @@ import { uid } from "@/shared/lib/format";
 import { useAppStore } from "@/shared/store/appStore";
 import { getAuthHeaders } from "@/shared/lib/authSession";
 import { callLLMWithFallback, isAbortError, type LLMMessage } from "@/shared/lib/llmClient";
+import type { LLMProviderId } from "@/shared/lib/llmRegistry";
+import {
+  readPreferredModel,
+  writePreferredModel,
+} from "@/features/chat/lib/modelSelection";
 import { apiClient } from "@/shared/lib/apiClient";
 import { assistantErrorMessage, isSpecificLLMFailure } from "@/features/chat/lib/chatError";
 import { metric } from "@/shared/lib/metrics";
@@ -38,6 +43,10 @@ interface ChatState {
   bargeIn: boolean;
   /** Live mic RMS (0..1) while recording; 0 when idle. Feeds crisis fusion. */
   prosody: number;
+  /** User's selected provider for replies (validated against registry). */
+  preferredProviderId: string;
+  preferredModelId: string;
+  setPreferredModel: (providerId: string, modelId: string) => void;
   setComposer: (value: string) => void;
   setActiveDropZone: (id: string | null) => void;
   setQuote: (quote: QuoteDraft | null) => void;
@@ -125,7 +134,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
   recording: false,
   bargeIn: false,
   prosody: 0,
+  preferredProviderId: readPreferredModel()?.providerId ?? "",
+  preferredModelId: readPreferredModel()?.modelId ?? "",
   setComposer: (composer) => set({ composer }),
+  setPreferredModel: (providerId, modelId) => {
+    writePreferredModel({ providerId: providerId as LLMProviderId, modelId });
+    set({ preferredProviderId: providerId, preferredModelId: modelId });
+  },
   setActiveDropZone: (activeDropZone) => set({ activeDropZone }),
   setQuote: (quote) => set({ quote }),
   attachFiles: (files) =>
@@ -249,7 +264,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         const messages: LLMMessage[] = [{ role: "user", content: reply }];
         let fullResponse = "";
 
-        await callLLMWithFallback(
+        const hasPref = Boolean(state.preferredProviderId && state.preferredModelId);
+        const response = await callLLMWithFallback(
           messages,
           (chunk) => {
             if (chunk.injectedMemoryIds && chunk.injectedMemoryIds.length > 0) {
@@ -268,8 +284,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
             }
           },
           controller.signal,
-          { backendUserText: text || "(media only)" },
+          {
+            backendUserText: text || "(media only)",
+            preferred: hasPref
+              ? { providerId: state.preferredProviderId as LLMProviderId, modelId: state.preferredModelId }
+              : undefined,
+          },
         );
+
+        // Stamp the model that actually produced this reply onto the message.
+        if (response?.providerId && response?.modelId) {
+          set((s) => ({
+            messages: s.messages.map((m) =>
+              m.streaming
+                ? { ...m, providerId: response.providerId, model: response.modelId }
+                : m,
+            ),
+          }));
+        }
 
         // Sync to backend (CockroachDB) — fire and forget
         const auth = getAuthHeaders();
@@ -415,16 +447,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
       activeAbort = controller;
       try {
         const messages: LLMMessage[] = [{ role: "user", content: "Continue your previous response from where it was truncated." }];
-        await callLLMWithFallback(messages, (chunk) => {
-          if (!chunk.done) {
-            get().appendStreamToken(chunk.delta);
-          } else {
-            get().finishStream();
-            metric.resumeSuccess();
-            metric.streamDone();
-            track(TELEMETRY_EVENTS.streamDone);
-          }
-        }, controller.signal);
+        const hasPref = Boolean(get().preferredProviderId && get().preferredModelId);
+        await callLLMWithFallback(
+          messages,
+          (chunk) => {
+            if (!chunk.done) {
+              get().appendStreamToken(chunk.delta);
+            } else {
+              get().finishStream();
+              metric.resumeSuccess();
+              metric.streamDone();
+              track(TELEMETRY_EVENTS.streamDone);
+            }
+          },
+          controller.signal,
+          hasPref
+            ? { preferred: { providerId: get().preferredProviderId as LLMProviderId, modelId: get().preferredModelId } }
+            : undefined,
+        );
       } catch (err) {
         if (isAbortError(err)) return;
         const specific = isSpecificLLMFailure(err);

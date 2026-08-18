@@ -278,6 +278,13 @@ export interface AttachmentListItem {
   createdAt?: string;
 }
 
+export interface AttachmentMediaResponse {
+  v: 1;
+  url: string;
+  mime?: string;
+  kind: string;
+}
+
 // ─────────────────────────────────────────────
 // API Client
 // ─────────────────────────────────────────────
@@ -626,4 +633,8 @@ export const apiClient = {
       token,
       deviceId,
     }),
+
+  /** GET /attachments/:id/media — Presigned GET url untuk memutar/media milik user. */
+  getAttachmentMedia: (id: string, token: string, deviceId: string) =>
+    api<AttachmentMediaResponse>(`/attachments/${id}/media`, { token, deviceId }),
 };

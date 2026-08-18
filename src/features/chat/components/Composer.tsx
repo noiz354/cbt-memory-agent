@@ -8,6 +8,7 @@ import { useEffect } from "react";
 import { AutoExpandTextarea } from "./AutoExpandTextarea";
 import { HoldToTalkOrb } from "./HoldToTalkOrb";
 import { VideoRecorderPip } from "./VideoRecorderPip";
+import { ModelPicker } from "./ModelPicker";
 
 const DRAFT_KEY = "cbt-composer-draft";
 
@@ -91,6 +92,11 @@ export function Composer() {
         </div>
       )}
 
+      <div className="mb-1.5 flex items-center justify-between">
+        <ModelPicker />
+        <span className="text-[11px] text-ink-mute">Model used for this reply &amp; voice notes</span>
+      </div>
+
       <div className="flex items-end gap-2">
         <label className="inline-flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-xl text-ink-mute hover:bg-canvas hover:text-ink">
           <Paperclip className="size-4" />
@@ -114,7 +120,7 @@ export function Composer() {
                         : "txt") as "pdf" | "txt" | "image" | "video" | "audio",
                 name: file.name,
                 sizeLabel: `${Math.max(1, Math.round(file.size / 1024))} KB`,
-                previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined,
+                previewUrl: URL.createObjectURL(file),
               }));
               if (files.length) attachFiles(files);
               e.target.value = "";
