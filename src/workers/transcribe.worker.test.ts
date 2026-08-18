@@ -29,6 +29,14 @@ describe("transcribe worker", () => {
     expect(mockPipeline).toHaveBeenCalledOnce();
   });
 
+  it("loads the quantized-safe fp32 weights (quantized ONNX fails in ort-web)", async () => {
+    const { warmupTranscriber } = await loadWorker();
+    await warmupTranscriber();
+    expect(mockPipeline.mock.calls[0][0]).toBe("automatic-speech-recognition");
+    expect(mockPipeline.mock.calls[0][1]).toBe("onnx-community/whisper-tiny");
+    expect(mockPipeline.mock.calls[0][2]).toMatchObject({ dtype: "fp32" });
+  });
+
   it("warm-up failure is non-fatal", async () => {
     mockPipeline.mockRejectedValue(new Error("net down"));
     const { warmupTranscriber } = await loadWorker();

@@ -39,7 +39,12 @@ let loading: Promise<AsrPipeline> | null = null;
 async function getTranscriber(): Promise<AsrPipeline> {
   if (transcriber) return transcriber;
   if (!loading) {
-    loading = pipeline("automatic-speech-recognition", "onnx-community/whisper-tiny") as Promise<AsrPipeline>;
+    // dtype fp32: kuantisasi int4/int8 (`weight_merged` MatMulNBits) dari
+    // onnx-community gagal dimuat onnxruntime-web (TransposeDQWeights... Missing
+    // required scale) → paksa bobot fp32 yang selalu dimuat tiap ort-web.
+    loading = pipeline("automatic-speech-recognition", "onnx-community/whisper-tiny", {
+      dtype: "fp32",
+    }) as Promise<AsrPipeline>;
   }
   transcriber = await loading;
   return transcriber;
