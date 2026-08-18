@@ -2,6 +2,7 @@ import { useChatStore } from "@/features/chat/store/chatStore";
 import { buildVideoTimeline, cancelVideoNote, startVideoNote, stopVideoNote } from "@/features/chat/lib/videoNote";
 import { indexAttachment } from "@/features/chat/lib/attachmentIndex";
 import { toast } from "@/shared/store/toastStore";
+import { track, TELEMETRY_EVENTS } from "@/shared/lib/telemetryEvents";
 import { cn } from "@/shared/lib/cn";
 import { LoaderCircle, Square, Video } from "lucide-react";
 import { useRef, useState } from "react";
@@ -30,6 +31,7 @@ export function VideoRecorderPip() {
     try {
       const note = await stopVideoNote();
       if (!note.ok || !note.blob || !note.blobUrl) {
+        track(TELEMETRY_EVENTS.attachmentFailed, { kind: "video", stage: "record", error: note?.error ?? "no blob" });
         toast("Recording failed", note?.error ?? "No video captured.", "danger");
         return;
       }
@@ -55,6 +57,11 @@ export function VideoRecorderPip() {
       });
       toast("Video indexed", `${analysis.dominantEmotion} timeline → memory`, "teal");
     } catch (err) {
+      track(TELEMETRY_EVENTS.attachmentFailed, {
+        kind: "video",
+        stage: "index",
+        error: err instanceof Error ? err.message : String(err),
+      });
       console.warn("[VideoRecorderPip] indexing failed:", err);
       toast("Index failed", err instanceof Error ? err.message : String(err), "danger");
     } finally {

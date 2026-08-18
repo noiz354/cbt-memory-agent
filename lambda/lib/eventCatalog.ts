@@ -59,12 +59,14 @@ export const TRACKED_EVENTS: readonly CatalogEvent[] = [
   // voice
   { name: "voice_note_recorded", category: "voice" },
   { name: "transcript_received", category: "voice" },
+  { name: "transcript_failed", category: "voice" },
   // memory
   { name: "memory_added", category: "memory" },
   { name: "memory_updated", category: "memory" },
   { name: "memory_deleted", category: "memory" },
   { name: "memory_searched", category: "memory" },
   { name: "memory_edge_linked", category: "memory" },
+  { name: "attachment_failed", category: "memory" },
   // privacy
   { name: "export_completed", category: "privacy" },
   { name: "purge_completed", category: "privacy" },

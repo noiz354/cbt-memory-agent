@@ -58,8 +58,9 @@ describe("event catalog", () => {
     for (const name of ["app_launch", "page_view", "signup_completed", "login_completed", "onboarding_completed",
       "session_started", "message_sent", "stream_done", "stream_truncated", "session_finalized", "session_interrupted",
       "crisis_triggered", "crisis_resolved", "crisis_grounding_done", "crisis_lifeline_used",
-      "voice_note_recorded", "transcript_received",
+      "voice_note_recorded", "transcript_received", "transcript_failed",
       "memory_added", "memory_updated", "memory_deleted", "memory_searched", "memory_edge_linked",
+      "attachment_failed",
       "export_completed", "purge_completed"]) {
       expect(ALLOWED_EVENTS, name).toContain(name);
     }
@@ -69,6 +70,14 @@ describe("event catalog", () => {
     expect(isAllowedEventName("page_view")).toBe(true);
     expect(isAllowedEventName("login_completed")).toBe(true);
     expect(isAllowedEventName("evil_event")).toBe(false);
+  });
+
+  it("tracks transcription and attachment failures (P0 observability)", () => {
+    for (const name of ["transcript_failed", "attachment_failed"]) {
+      expect(ALLOWED_EVENTS, name).toContain(name);
+    }
+    expect(isAllowedEventName("transcript_failed")).toBe(true);
+    expect(isAllowedEventName("attachment_failed")).toBe(true);
   });
 
   it("partitionEvents drops non-catalog events", () => {

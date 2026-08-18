@@ -117,6 +117,21 @@ export function stopVoiceNote(): Promise<VoiceNoteResult> {
   });
 }
 
+function getPlatform(): string {
+  if (typeof navigator === "undefined") return "unknown";
+  const ua = navigator as Navigator & { userAgentData?: { platform?: string } };
+  return ua.userAgentData?.platform ?? navigator.platform ?? "unknown";
+}
+
+function trackTranscriptFailure(via: "whisper" | "web-speech", stage: string, error?: string): void {
+  track(TELEMETRY_EVENTS.transcriptFailed, {
+    via,
+    stage,
+    error: error ?? "no transcript",
+    platform: getPlatform(),
+  });
+}
+
 /** Cancel recording without producing a note. */
 export function cancelVoiceNote(): void {
   const r = recorder;
@@ -154,6 +169,7 @@ async function transcribeVoiceNote(
   liveFallbackText?: string,
 ): Promise<VoiceNoteResult> {
   if (!transcribeWorker) {
+    trackTranscriptFailure("whisper", "worker-init", "worker unavailable");
     return new Promise<VoiceNoteResult>((resolve) => resolveFromFallback(resolve, liveFallbackText, blobUrl));
   }
   const durationMs = await measureBlobDuration(blobUrl);
@@ -172,6 +188,7 @@ async function transcribeVoiceNote(
           via: "whisper",
         });
       } else {
+        trackTranscriptFailure("whisper", "worker", event.data.error ?? (event.data.text ? "empty text" : "no transcript"));
         resolveFromFallback(resolve, liveFallbackText, blobUrl, event.data.error);
       }
     };
@@ -190,6 +207,7 @@ function resolveFromFallback(
     track(TELEMETRY_EVENTS.transcriptReceived, { via: "web-speech" });
     resolve({ ok: true, text, blobUrl, via: "web-speech" });
   } else {
+    trackTranscriptFailure("web-speech", "fallback", error ?? "no web-speech transcript");
     resolve({ ok: false, blobUrl, error: error ?? "transcription failed" });
   }
 }

@@ -6,6 +6,7 @@ import { cn } from "@/shared/lib/cn";
 import { classifyFetchError } from "@/shared/lib/errors";
 import { useAppStore } from "@/shared/store/appStore";
 import { toast } from "@/shared/store/toastStore";
+import { track, TELEMETRY_EVENTS } from "@/shared/lib/telemetryEvents";
 import { useDraggable } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
 import { Camera, CameraOff, ScanFace, LoaderCircle, Check } from "lucide-react";
@@ -121,6 +122,11 @@ export function CameraPip() {
       toast("Snapshot indexed", `Emotion: ${emotions.primary} (${Math.round(emotions.confidence * 100)}%) → memory`, "teal");
     } catch (err) {
       const classified = classifyFetchError(err);
+      track(TELEMETRY_EVENTS.attachmentFailed, {
+        kind: "image",
+        stage: "index",
+        error: classified.code ?? String(err),
+      });
       console.warn("[CameraPip] analyze-and-save failed:", classified.code, err);
       toast("Index failed", classified.message, "danger");
     } finally {

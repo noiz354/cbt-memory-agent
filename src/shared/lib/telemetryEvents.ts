@@ -34,12 +34,14 @@ export const TELEMETRY_EVENTS = {
   // voice
   voiceNoteRecorded: "voice_note_recorded",
   transcriptReceived: "transcript_received",
+  transcriptFailed: "transcript_failed",
   // memory
   memoryAdded: "memory_added",
   memoryUpdated: "memory_updated",
   memoryDeleted: "memory_deleted",
   memorySearched: "memory_searched",
   memoryEdgeLinked: "memory_edge_linked",
+  attachmentFailed: "attachment_failed",
   // privacy
   exportCompleted: "export_completed",
   purgeCompleted: "purge_completed",

@@ -2,6 +2,7 @@ import { useChatStore } from "@/features/chat/store/chatStore";
 import { cancelVoiceNote, startVoiceNote, stopVoiceNote } from "@/features/chat/lib/voiceNote";
 import { indexVoiceNote } from "@/features/chat/lib/voiceAttachment";
 import { toast } from "@/shared/store/toastStore";
+import { track, TELEMETRY_EVENTS } from "@/shared/lib/telemetryEvents";
 import { motion } from "framer-motion";
 import { Mic } from "lucide-react";
 import { useRef, useState } from "react";
@@ -37,6 +38,7 @@ export function HoldToTalkOrb() {
           src: note.blobUrl,
         });
       } else {
+        track(TELEMETRY_EVENTS.attachmentFailed, { kind: "audio", stage: "record", error: note.error ?? "no blob" });
         toast("Voice note failed", note.error ?? "Recording failed.", "danger");
       }
       return;
@@ -64,6 +66,11 @@ export function HoldToTalkOrb() {
       })
         .then(() => toast("Voice note indexed", "Emotion analysis → memory", "teal"))
         .catch((err) => {
+          track(TELEMETRY_EVENTS.attachmentFailed, {
+            kind: "audio",
+            stage: "index",
+            error: err instanceof Error ? err.message : String(err),
+          });
           console.warn("[HoldToTalkOrb] voice-note index failed:", err);
           toast("Index failed", err instanceof Error ? err.message : String(err), "danger");
         });
