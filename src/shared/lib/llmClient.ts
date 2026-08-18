@@ -336,7 +336,7 @@ async function callOllama(
   started: number,
   signal?: AbortSignal,
 ): Promise<LLMResponse> {
-  const { fetchOllamaModels, ollamaBaseUrlCandidates } = await import("@/shared/lib/llmRegistry");
+  const { ollamaBaseUrlCandidates } = await import("@/shared/lib/llmRegistry");
   let baseUrl = getProvider("ollama").baseUrl;
 
   // Kalau baseUrl default (localhost) tidak merespons (mis. WSL → Ollama di

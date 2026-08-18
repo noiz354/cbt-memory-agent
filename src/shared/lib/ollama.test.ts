@@ -28,13 +28,15 @@ afterEach(() => {
 });
 
 describe("ollamaChatModels", () => {
+  const tag = (name: string, capabilities?: string[]) => ({ name, model: name, capabilities });
+
   it("menyaring model embedding-only", () => {
     const models = [
-      { name: "nomic-embed-text:latest", capabilities: ["embedding"] },
-      { name: "llama3.1:latest", capabilities: ["completion", "tools"] },
-      { name: "qwen3:4b", capabilities: ["completion", "tools", "thinking"] },
-      { name: "minicpm-v:latest", capabilities: ["completion", "vision"] },
-      { name: "mxbai-embed-large:latest", capabilities: ["embedding"] },
+      tag("nomic-embed-text:latest", ["embedding"]),
+      tag("llama3.1:latest", ["completion", "tools"]),
+      tag("qwen3:4b", ["completion", "tools", "thinking"]),
+      tag("minicpm-v:latest", ["completion", "vision"]),
+      tag("mxbai-embed-large:latest", ["embedding"]),
     ];
     const chat = ollamaChatModels(models);
     expect(chat.map((m) => m.name)).toEqual([
@@ -45,7 +47,7 @@ describe("ollamaChatModels", () => {
   });
 
   it("memperlakukan model tanpa capabilities sebagai chat model", () => {
-    const models = [{ name: "unknown-model:latest", capabilities: undefined }];
+    const models = [tag("unknown-model:latest")];
     expect(ollamaChatModels(models)).toHaveLength(1);
   });
 });
@@ -58,12 +60,14 @@ describe("ollamaBaseUrlCandidates", () => {
 });
 
 describe("fetchOllamaModels", () => {
+  const tag = (name: string, capabilities?: string[]) => ({ name, model: name, capabilities });
+
   it("mengembalikan model saat localhost merespons", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => ({ models: [{ name: "llama3.1:latest", capabilities: ["completion"] }] }),
+        json: async () => ({ models: [tag("llama3.1:latest", ["completion"])] }),
       }),
     );
     const res = await fetchOllamaModels();
@@ -81,7 +85,7 @@ describe("fetchOllamaModels", () => {
       .mockRejectedValueOnce(new TypeError("Failed to fetch")) // localhost gagal
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ models: [{ name: "qwen3:4b", capabilities: ["completion"] }] }),
+        json: async () => ({ models: [tag("qwen3:4b", ["completion"])] }),
       });
     vi.stubGlobal("fetch", fetchMock);
 
