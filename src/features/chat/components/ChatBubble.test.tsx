@@ -19,9 +19,9 @@ import React from "react";
 const capturedProps: Record<string, unknown>[] = [];
 vi.mock("framer-motion", () => ({
   motion: {
-    article: ({ children, ...props }: Record<string, unknown>) => {
+    article: ({ children, ...props }: { children?: React.ReactNode } & Record<string, unknown>) => {
       capturedProps.push(props);
-      return React.createElement("article", props, children);
+      return React.createElement("article", props as Record<string, string>, children);
     },
   },
 }));
