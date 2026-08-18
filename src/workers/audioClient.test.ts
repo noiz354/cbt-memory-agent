@@ -122,7 +122,7 @@ describe("startAudioWorker — VAD gating", () => {
   });
 
   it("counts silence frames from VAD verdicts when a consumer exists", async () => {
-    const port = stubBrowserGlobals();
+    stubBrowserGlobals();
     await startAudioWorker(stream, vi.fn(), vi.fn());
 
     const vad = state.workers.find((w) => w.url.includes("vad.worker"))!;
