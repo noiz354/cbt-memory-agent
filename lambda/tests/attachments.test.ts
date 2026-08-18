@@ -152,6 +152,32 @@ describe("attachments — create", () => {
     expect(llm.generateEmbedding.mock.calls[0][0]).toContain("appeared sad");
   });
 
+  it("rounds fractional durationMs/frameCount to integers before insert (INT columns)", async () => {
+    const crdb = crdbMock();
+    const llm = llmMock();
+    const s3 = s3Mock();
+    const res = await handleCreateAttachment(
+      {
+        body: JSON.stringify({
+          v: 1,
+          attachment: { ...IMAGE_ATTACHMENT, kind: "video", durationMs: 5072.058, frameCount: 3.7 },
+        }),
+      } as any,
+      crdb,
+      llm,
+      s3,
+      "tok-1",
+      "dev-1",
+    );
+    expect(res.statusCode).toBe(200);
+
+    const attInsert = crdb.executes.find((c: ExecuteCall) => c.sql.includes("INSERT INTO attachments"));
+    expect(attInsert).toBeTruthy();
+    // $4 = duration_ms, $5 = frame_count — harus integer (Math.round).
+    expect(attInsert!.params?.[3]).toBe(5072);
+    expect(attInsert!.params?.[4]).toBe(4);
+  });
+
   it("rejects s3Key not under the user's media prefix (400, traversal guard)", async () => {
     const crdb = crdbMock();
     const llm = llmMock();

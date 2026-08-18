@@ -66,7 +66,7 @@ export function VideoRecorderPip() {
         error: err instanceof Error ? err.message : String(err),
       });
       console.warn("[VideoRecorderPip] indexing failed:", err);
-      toast("Index failed", err instanceof Error ? err.message : String(err), "danger");
+      toast("Index failed", "We couldn't save this video. Please try again.", "danger");
     } finally {
       setAnalyzing(false);
     }

@@ -85,12 +85,19 @@ let analyzerWorker: Worker | null = null;
 const analyzerQueue: {
   resolve: (signal: FaceSignal) => void;
   reject: (err: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
 }[] = [];
+
+// A frame must classify within this window or it is treated as a failure so the
+// video-timeline loop can move on instead of hanging (model init can be slow on
+// first frame; still bounds the worst-case latency).
+const ANALYZE_TIMEOUT_MS = 12_000;
 
 /**
  * Run face-expression classification on a single frame (one-shot).
  * Used by the image-snapshot and video-timeline attachment pipelines.
- * Returns a promise that resolves with the FaceSignal for that frame.
+ * Returns a promise that resolves with the FaceSignal for that frame, or
+ * rejects after ANALYZE_TIMEOUT_MS / on worker error (no permanent hang).
  */
 export function analyzeFrame(frame: ImageData): Promise<FaceSignal> {
   if (!analyzerWorker) {
@@ -98,17 +105,26 @@ export function analyzeFrame(frame: ImageData): Promise<FaceSignal> {
     analyzerWorker.onmessage = (event: MessageEvent<FaceWorkerOut>) => {
       if (event.data.type !== "signal") return;
       const pending = analyzerQueue.shift();
-      pending?.resolve({
-        expression: event.data.expression,
-        confidence: event.data.confidence,
-        updatedAt: event.data.updatedAt,
-        model: event.data.model,
-      });
+      if (pending) {
+        clearTimeout(pending.timer);
+        pending.resolve({
+          expression: event.data.expression,
+          confidence: event.data.confidence,
+          updatedAt: event.data.updatedAt,
+          model: event.data.model,
+        });
+      }
     };
+    analyzerWorker.onerror = (event) => rejectAll(new Error(event?.message || "Face analyzer error"));
   }
 
   return new Promise<FaceSignal>((resolve, reject) => {
-    analyzerQueue.push({ resolve, reject });
+    const timer = setTimeout(() => {
+      const idx = analyzerQueue.findIndex((p) => p.timer === timer);
+      if (idx >= 0) analyzerQueue.splice(idx, 1);
+      reject(new Error("Face analyze timed out"));
+    }, ANALYZE_TIMEOUT_MS);
+    analyzerQueue.push({ resolve, reject, timer });
     const buffer = frame.data.buffer.slice(0); // copy — caller may reuse the canvas
     analyzerWorker?.postMessage(
       { type: "analyze", width: frame.width, height: frame.height, buffer },
@@ -117,10 +133,16 @@ export function analyzeFrame(frame: ImageData): Promise<FaceSignal> {
   });
 }
 
+function rejectAll(err: Error): void {
+  for (const pending of analyzerQueue.splice(0)) {
+    clearTimeout(pending.timer);
+    pending.reject(err);
+  }
+}
+
 /** Terminate the one-shot analyzer (releases the MediaPipe model). */
 export function stopAnalyzeWorker() {
   analyzerWorker?.terminate();
   analyzerWorker = null;
-  for (const pending of analyzerQueue) pending.reject(new Error("Face analyzer terminated."));
-  analyzerQueue.length = 0;
+  rejectAll(new Error("Face analyzer terminated."));
 }

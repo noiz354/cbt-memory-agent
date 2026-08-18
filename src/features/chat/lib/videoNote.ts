@@ -89,7 +89,7 @@ function measureVideoDuration(blobUrl: string): Promise<number> {
     video.preload = "metadata";
     video.muted = true;
     video.src = blobUrl;
-    video.addEventListener("loadedmetadata", () => resolve((video.duration || 0) * 1000), { once: true });
+    video.addEventListener("loadedmetadata", () => resolve(Math.round((video.duration || 0) * 1000)), { once: true });
     video.addEventListener("error", () => resolve(0), { once: true });
     setTimeout(() => resolve(0), 5000);
   });
@@ -129,7 +129,14 @@ export async function buildVideoTimeline(
     canvas.height = h;
     ctx.drawImage(video, 0, 0, w, h);
     const frame = ctx.getImageData(0, 0, w, h);
-    const signal = await analyzeFrame(frame);
+    let signal: Awaited<ReturnType<typeof analyzeFrame>>;
+    try {
+      signal = await analyzeFrame(frame);
+    } catch {
+      // One frame failed (timeout / worker error) — skip it and keep sampling;
+      // never let a single failure hang or abort the whole timeline build.
+      continue;
+    }
     points.push({ tMs: Math.min(t, lastMs), emotion: signal.expression, confidence: signal.confidence });
   }
 

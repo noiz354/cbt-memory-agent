@@ -194,7 +194,7 @@ type TranscribeMsg = {
 function measureBlobDuration(blobUrl: string): Promise<number> {
   return new Promise((resolve) => {
     const audio = new Audio(blobUrl);
-    audio.addEventListener("loadedmetadata", () => resolve(audio.duration * 1000), { once: true });
+    audio.addEventListener("loadedmetadata", () => resolve(Math.round(audio.duration * 1000)), { once: true });
     audio.addEventListener("error", () => resolve(0), { once: true });
     setTimeout(() => resolve(0), 5000);
   });

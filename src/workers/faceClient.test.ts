@@ -15,6 +15,7 @@ describe("faceClient.analyzeFrame", () => {
 
   class FakeWorker {
     onmessage: ((event: { data: unknown }) => void) | null = null;
+    onerror: ((event: ErrorEvent) => void) | null = null;
     posted: unknown[] = [];
     terminated = false;
     constructor(_url: unknown, _opts: unknown) {
@@ -90,5 +91,26 @@ describe("faceClient.analyzeFrame", () => {
     stopAnalyzeWorker();
     await expect(p1).rejects.toThrow("Face analyzer terminated.");
     expect(instances[0].terminated).toBe(true);
+  });
+
+  it("fails a frame with a timeout instead of hanging forever", async () => {
+    signal = null; // worker never responds → should time out
+    vi.useFakeTimers();
+    try {
+      const frame = makeFrame();
+      const promise = analyzeFrame(frame);
+      await vi.advanceTimersByTimeAsync(13_000);
+      await expect(promise).rejects.toThrow(/timed out/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rejects the current frame when the worker emits an error", async () => {
+    signal = null;
+    const frame = makeFrame();
+    const promise = analyzeFrame(frame);
+    instances[0].onerror?.({ message: "model crashed" } as ErrorEvent);
+    await expect(promise).rejects.toThrow("model crashed");
   });
 });

@@ -171,6 +171,10 @@ export async function handleCreateAttachment(
     const now = new Date().toISOString();
     const excerpt = attachment.embeddedNarrative.slice(0, 200);
     const confidence = Math.min(1, Math.max(0, attachment.confidence ?? 0.6));
+    // duration_ms/frame_count: kolom INT di schema — bulatkan agar nilai pecahan
+    // (dari measure*Duration *1000) tidak ditolak CockroachDB (strconv.ParseInt).
+    const durationMs = attachment.durationMs == null ? null : Math.round(attachment.durationMs);
+    const frameCount = attachment.frameCount == null ? null : Math.round(attachment.frameCount);
 
     await crdb.execute(
       `INSERT INTO memory_nodes (id, user_id, kind, title, excerpt, tags, weight, confidence, verified, ref_count, last_touched, x, y, crisis_flag)
@@ -189,8 +193,8 @@ export async function handleCreateAttachment(
         userId,
         nodeId,
         attachment.kind,
-        attachment.durationMs ?? null,
-        attachment.frameCount ?? null,
+        durationMs,
+        frameCount,
         JSON.stringify(attachment.analysis ?? {}),
         attachment.embeddedNarrative,
         attachment.s3Key,
