@@ -1,6 +1,7 @@
 import { useChatStore } from "@/features/chat/store/chatStore";
 import { buildVideoTimeline, cancelVideoNote, startVideoNote, stopVideoNote } from "@/features/chat/lib/videoNote";
 import { indexAttachment } from "@/features/chat/lib/attachmentIndex";
+import { extFromMimeType } from "@/features/chat/lib/mediaFormats";
 import { toast } from "@/shared/store/toastStore";
 import { track, TELEMETRY_EVENTS } from "@/shared/lib/telemetryEvents";
 import { cn } from "@/shared/lib/cn";
@@ -38,6 +39,7 @@ export function VideoRecorderPip() {
       const durationMs = note.durationMs ?? 0;
       const { timeline, analysis } = await buildVideoTimeline(note.blobUrl, durationMs);
       if (timeline.length === 0) {
+        URL.revokeObjectURL(note.blobUrl);
         toast("No faces detected", "Could not sample any frames for emotion analysis.", "danger");
         return;
       }
@@ -47,7 +49,7 @@ export function VideoRecorderPip() {
         kind: "video",
         blob: note.blob,
         mimeType: note.mimeType ?? "video/webm",
-        ext: "webm",
+        ext: extFromMimeType(note.mimeType ?? "video/webm"),
         analysis: { timeline: analysis.timeline, arc_summary: analysis.arcSummary, dominant_emotion: analysis.dominantEmotion, volatility: analysis.volatility },
         embeddedNarrative: analysis.narrative,
         title: `Video · ${analysis.dominantEmotion} · ${Math.round(durationMs / 1000)}s`,
@@ -55,6 +57,7 @@ export function VideoRecorderPip() {
         durationMs,
         frameCount: timeline.length,
       });
+      URL.revokeObjectURL(note.blobUrl);
       toast("Video indexed", `${analysis.dominantEmotion} timeline → memory`, "teal");
     } catch (err) {
       track(TELEMETRY_EVENTS.attachmentFailed, {

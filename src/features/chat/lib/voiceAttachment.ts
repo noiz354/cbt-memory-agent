@@ -1,5 +1,6 @@
 import { analyzeAudio, type AudioAnalysis } from "@/features/chat/lib/attachmentAnalysis";
 import { indexAttachment, type IndexAttachmentResult } from "@/features/chat/lib/attachmentIndex";
+import { extFromMimeType } from "@/features/chat/lib/mediaFormats";
 
 interface ProsodyMsg {
   type: "prosody";
@@ -27,7 +28,7 @@ function getProsodyWorker(): Worker | null {
 
 /** Compute prosody features on-device from a recorded voice-note blob. */
 export async function analyzeVoiceProsody(
-  blobUrl: string,
+  blob: Blob,
   wordCount: number,
 ): Promise<ProsodyMsg["result"]> {
   const worker = getProsodyWorker();
@@ -41,7 +42,7 @@ export async function analyzeVoiceProsody(
       else reject(new Error(event.data.error ?? "Prosody analysis failed."));
     };
     worker.addEventListener("message", onMsg);
-    worker.postMessage({ type: "analyze", blobUrl, wordCount });
+    worker.postMessage({ type: "analyze", blob, wordCount });
   });
 }
 
@@ -50,13 +51,13 @@ export async function analyzeVoiceProsody(
  * presign/upload/create. Returns the created memory node id.
  */
 export async function indexVoiceNote(input: {
-  blobUrl: string;
+  blob: Blob;
   mimeType: string;
   transcript: string;
   durationMs: number;
 }): Promise<IndexAttachmentResult> {
   const wordCount = input.transcript.trim().split(/\s+/).filter(Boolean).length;
-  const prosody = await analyzeVoiceProsody(input.blobUrl, wordCount);
+  const prosody = await analyzeVoiceProsody(input.blob, wordCount);
   if (!prosody) throw new Error("Prosody analysis returned no features.");
   const analysis: AudioAnalysis = analyzeAudio({
     transcript: input.transcript,
@@ -66,13 +67,12 @@ export async function indexVoiceNote(input: {
 
   const { fusedEmotion } = analysis;
   const title = `Voice note · ${fusedEmotion.emotion} · ${Math.round(input.durationMs / 1000)}s`;
-  const blob = await fetch(input.blobUrl).then((r) => r.blob());
 
   return indexAttachment({
     kind: "audio",
-    blob,
+    blob: input.blob,
     mimeType: input.mimeType,
-    ext: "webm",
+    ext: extFromMimeType(input.mimeType),
     analysis: {
       transcript: input.transcript,
       prosody,

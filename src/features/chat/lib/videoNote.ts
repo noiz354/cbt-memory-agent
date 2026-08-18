@@ -1,5 +1,6 @@
 import { analyzeFrame } from "@/workers/faceClient";
 import { analyzeVideoTimeline, type TimelinePoint } from "@/features/chat/lib/attachmentAnalysis";
+import { timelineStops } from "@/features/chat/lib/mediaFormats";
 import { track, TELEMETRY_EVENTS } from "@/shared/lib/telemetryEvents";
 
 /**
@@ -112,8 +113,9 @@ export async function buildVideoTimeline(
   const points: TimelinePoint[] = [];
   const canvas = document.createElement("canvas");
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  const lastMs = Math.max(0, durationMs - 1);
 
-  for (let t = 0; t < durationMs; t += step) {
+  for (const t of timelineStops(durationMs, step)) {
     video.currentTime = Math.min(t / 1000, Math.max(0, (durationMs - 100) / 1000));
     await new Promise<void>((resolve) => {
       video.onseeked = () => resolve();
@@ -128,7 +130,7 @@ export async function buildVideoTimeline(
     ctx.drawImage(video, 0, 0, w, h);
     const frame = ctx.getImageData(0, 0, w, h);
     const signal = await analyzeFrame(frame);
-    points.push({ tMs: Math.min(t, durationMs - 1), emotion: signal.expression, confidence: signal.confidence });
+    points.push({ tMs: Math.min(t, lastMs), emotion: signal.expression, confidence: signal.confidence });
   }
 
   return { timeline: points, analysis: analyzeVideoTimeline(points, { durationMs }) };

@@ -17,11 +17,13 @@ interface RecorderHandles {
   stream: MediaStream;
   chunks: Blob[];
   blobUrl: string | null;
+  blob: Blob;
 }
 
 export interface VoiceNoteResult {
   ok: boolean;
   text?: string;
+  blob?: Blob;
   blobUrl?: string;
   durationMs?: number;
   mimeType?: string;
@@ -43,24 +45,31 @@ function detectLanguage(): string {
 
 let recorder: RecorderHandles | null = null;
 let liveRecognition: LiveRecognition | null = null;
+let startPromise: Promise<void> | null = null;
+let startCancelled = false;
 
 /** Begin capturing: mic → MediaRecorder + audio-worker VAD/level. */
 export async function startVoiceNote(
   onLevel?: (rms: number, peak: number) => void,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   stopVoiceNote();
+  startCancelled = false;
 
-  try {
+  startPromise = (async () => {
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: true, noiseSuppression: true },
     });
+    if (startCancelled) {
+      stream.getTracks().forEach((t) => t.stop());
+      return;
+    }
     const mediaRecorder = new MediaRecorder(stream);
     const chunks: Blob[] = [];
     mediaRecorder.ondataavailable = (e) => {
       if (e.data.size > 0) chunks.push(e.data);
     };
     mediaRecorder.start();
-    recorder = { mediaRecorder, stream, chunks, blobUrl: null };
+    recorder = { mediaRecorder, stream, chunks, blobUrl: null, blob: new Blob() };
 
     // Wire the analysis pipeline (VAD + RMS level) — real, gated by voice activity.
     if (onLevel) {
@@ -77,21 +86,37 @@ export async function startVoiceNote(
     if (isWebSpeechSupported()) {
       liveRecognition = startLiveRecognition();
     }
+  })();
+
+  try {
+    await startPromise;
     return { ok: true };
   } catch (err) {
     return {
       ok: false,
       error: err instanceof Error ? err.message : "Microphone unavailable",
     };
+  } finally {
+    startPromise = null;
   }
 }
 
 /** Stop capture, transcribe, and return the voice note (text + blob). */
-export function stopVoiceNote(): Promise<VoiceNoteResult> {
-  return new Promise((resolve) => {
-    const r = recorder;
-    if (!r) return resolve({ ok: false, error: "not recording" });
+export async function stopVoiceNote(): Promise<VoiceNoteResult> {
+  // Pointer-up can race the getUserMedia round-trip; wait for an in-flight
+  // start before giving up, so quick taps don't read `recorder === null`.
+  if (!recorder && startPromise) {
+    try {
+      await Promise.race([startPromise, new Promise((r) => setTimeout(r, 3000))]);
+    } catch {
+      // start failed; fall through to the not-recording path
+    }
+    startPromise = null;
+  }
+  const r = recorder;
+  if (!r) return { ok: false, error: "not recording" };
 
+  return new Promise((resolve) => {
     stopAudioWorker();
     useChatStore.getState().setProsody(0);
     const stopAndBlob = () => {
@@ -100,6 +125,7 @@ export function stopVoiceNote(): Promise<VoiceNoteResult> {
       const blob = new Blob(r.chunks, { type: mimeType });
       const blobUrl = URL.createObjectURL(blob);
       r.blobUrl = blobUrl;
+      r.blob = blob;
       recorder = null;
       track(TELEMETRY_EVENTS.voiceNoteRecorded);
       const liveFallbackText = liveRecognition?.getTranscript();
@@ -133,7 +159,16 @@ function trackTranscriptFailure(via: "whisper" | "web-speech", stage: string, er
 }
 
 /** Cancel recording without producing a note. */
-export function cancelVoiceNote(): void {
+export async function cancelVoiceNote(): Promise<void> {
+  startCancelled = true;
+  if (startPromise) {
+    try {
+      await Promise.race([startPromise, new Promise((r) => setTimeout(r, 3000))]);
+    } catch {
+      // start failed; nothing to clean up
+    }
+    startPromise = null;
+  }
   const r = recorder;
   liveRecognition?.stop();
   liveRecognition = null;

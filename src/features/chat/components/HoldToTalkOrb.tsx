@@ -57,9 +57,9 @@ export function HoldToTalkOrb() {
     });
 
     // Best-effort index into memory (prosody → fused emotion → narrative).
-    if (note.ok && note.text && note.blobUrl) {
+    if (note.ok && note.text && note.blobUrl && note.blob) {
       void indexVoiceNote({
-        blobUrl: note.blobUrl,
+        blob: note.blob,
         mimeType: note.mimeType ?? "audio/webm",
         transcript: note.text,
         durationMs: note.durationMs ?? 0,
@@ -86,13 +86,13 @@ export function HoldToTalkOrb() {
       onPointerLeave={stop}
       onPointerCancel={() => {
         cancelling.current = true;
-        cancelVoiceNote();
+        void cancelVoiceNote();
         setRecording(false);
       }}
       onContextMenu={(e) => {
         e.preventDefault();
         cancelling.current = true;
-        cancelVoiceNote();
+        void cancelVoiceNote();
         setRecording(false);
       }}
       animate={{ scale: recording ? 1.12 : 1 }}

@@ -10,7 +10,7 @@ import { computeProsody } from "@/features/chat/lib/prosody";
 
 interface ProsodyIn {
   type: "analyze";
-  blobUrl: string;
+  blob: Blob;
   /** jumlah kata dari transcript (untuk speech rate); opsional */
   wordCount?: number;
 }
@@ -29,9 +29,8 @@ interface ProsodyOut {
   error?: string;
 }
 
-async function decodeAudio(blobUrl: string): Promise<{ samples: Float32Array; sampleRate: number }> {
-  const response = await fetch(blobUrl);
-  const arrayBuffer = await response.arrayBuffer();
+async function decodeAudio(blob: Blob): Promise<{ samples: Float32Array; sampleRate: number }> {
+  const arrayBuffer = await blob.arrayBuffer();
   const ctx = new OfflineAudioContext(1, 1, 16000);
   const decoded = await ctx.decodeAudioData(arrayBuffer);
   return { samples: decoded.getChannelData(0), sampleRate: decoded.sampleRate };
@@ -40,7 +39,7 @@ async function decodeAudio(blobUrl: string): Promise<{ samples: Float32Array; sa
 self.onmessage = async (event: MessageEvent<ProsodyIn>) => {
   if (event.data.type !== "analyze") return;
   try {
-    const { samples, sampleRate } = await decodeAudio(event.data.blobUrl);
+    const { samples, sampleRate } = await decodeAudio(event.data.blob);
     const result = computeProsody(samples, sampleRate, { wordCount: event.data.wordCount });
     const durationMs = Math.round((samples.length / sampleRate) * 1000);
 
