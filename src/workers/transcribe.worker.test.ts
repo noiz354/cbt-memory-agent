@@ -1,0 +1,72 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+const mockPipeline = vi.hoisted(() => vi.fn());
+
+vi.mock("@huggingface/transformers", () => ({
+  pipeline: mockPipeline,
+  env: { allowLocalModels: false },
+}));
+
+const model = vi.fn();
+
+async function loadWorker() {
+  vi.resetModules();
+  return import("@/workers/transcribe.worker");
+}
+
+beforeEach(() => {
+  mockPipeline.mockReset();
+  model.mockReset();
+  mockPipeline.mockResolvedValue(model);
+});
+
+describe("transcribe worker", () => {
+  it("preloads the model once via warmupTranscriber (idle warm-up)", async () => {
+    const { warmupTranscriber } = await loadWorker();
+    await warmupTranscriber();
+    expect(mockPipeline).toHaveBeenCalledOnce();
+    await warmupTranscriber();
+    expect(mockPipeline).toHaveBeenCalledOnce();
+  });
+
+  it("warm-up failure is non-fatal", async () => {
+    mockPipeline.mockRejectedValue(new Error("net down"));
+    const { warmupTranscriber } = await loadWorker();
+    await expect(warmupTranscriber()).resolves.toBeUndefined();
+  });
+
+  it("returns trimmed text on success with language hint", async () => {
+    model.mockResolvedValue({ text: "  hai, apa kabar?  " });
+    const { handleTranscribe } = await loadWorker();
+    const out = await handleTranscribe({ type: "transcribe", blobUrl: "blob:1", language: "id" });
+    expect(out).toMatchObject({ ok: true, text: "hai, apa kabar?" });
+    expect(model).toHaveBeenCalledWith("blob:1", expect.objectContaining({ language: "id" }));
+  });
+
+  it("reports model-load failures with stage and message", async () => {
+    mockPipeline.mockRejectedValue(new Error("model 404"));
+    const { handleTranscribe } = await loadWorker();
+    const out = await handleTranscribe({ type: "transcribe", blobUrl: "blob:1" });
+    expect(out.ok).toBe(false);
+    expect(out.stage).toBe("model-load");
+    expect(out.error).toBe("model 404");
+  });
+
+  it("reports inference failures with stage and message", async () => {
+    const { handleTranscribe } = await loadWorker();
+    model.mockRejectedValue(new Error("wasm oom"));
+    const out = await handleTranscribe({ type: "transcribe", blobUrl: "blob:1" });
+    expect(out.ok).toBe(false);
+    expect(out.stage).toBe("inference");
+    expect(out.error).toBe("wasm oom");
+  });
+
+  it("reports empty transcript as decode-stage failure (not success)", async () => {
+    model.mockResolvedValue({ text: "   " });
+    const { handleTranscribe } = await loadWorker();
+    const out = await handleTranscribe({ type: "transcribe", blobUrl: "blob:1" });
+    expect(out.ok).toBe(false);
+    expect(out.stage).toBe("decode");
+    expect(out.error).toBe("empty transcript");
+  });
+});

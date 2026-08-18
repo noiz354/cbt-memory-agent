@@ -151,6 +151,7 @@ type TranscribeMsg = {
   ok: boolean;
   text?: string;
   error?: string;
+  stage?: string;
 };
 
 /** Measure a blob's duration on the main thread (DOM only). */
@@ -188,7 +189,11 @@ async function transcribeVoiceNote(
           via: "whisper",
         });
       } else {
-        trackTranscriptFailure("whisper", "worker", event.data.error ?? (event.data.text ? "empty text" : "no transcript"));
+        trackTranscriptFailure(
+          "whisper",
+          event.data.stage ?? "worker",
+          event.data.error ?? (event.data.text ? "empty text" : "no transcript"),
+        );
         resolveFromFallback(resolve, liveFallbackText, blobUrl, event.data.error);
       }
     };
