@@ -14,6 +14,7 @@ import {
   handleListAttachments,
   handleDeleteAttachment,
 } from "../handlers/attachments";
+import { MAX_MEDIA_UPLOAD_BYTES } from "../lib/s3";
 import { toVectorLiteral } from "../lib/vectors";
 
 type ExecuteCall = { sql: string; params?: unknown[] };
@@ -45,7 +46,11 @@ function llmMock() {
 
 function s3Mock() {
   return {
-    presignMediaUpload: vi.fn(async () => "https://s3.example/upload"),
+    presignMediaPost: vi.fn(async () => ({
+      url: "https://s3.example/post",
+      fields: { key: "media/key", "x-amz-algorithm": "AWS4-HMAC-SHA256" },
+    })),
+    headMediaObject: vi.fn(async () => ({ exists: true, sizeBytes: 2048 })),
     deleteMediaObject: vi.fn(async () => undefined),
     deleteMediaPrefix: vi.fn(async () => 3),
     uploadExport: vi.fn(async () => "https://s3.example/export"),
@@ -70,7 +75,7 @@ const IMAGE_ATTACHMENT = {
 };
 
 describe("attachments — presign", () => {
-  it("returns media key prefixed with user id + upload URL", async () => {
+  it("returns media key prefixed with user id + action + fields for the POST upload", async () => {
     const crdb = crdbMock();
     const s3 = s3Mock();
     const res = await handlePresignAttachment(
@@ -84,9 +89,11 @@ describe("attachments — presign", () => {
     const body = JSON.parse(res.body);
     expect(body.v).toBe(1);
     expect(body.key).toMatch(new RegExp(`^media/${USER}/[0-9a-f-]+\\.jpg$`));
-    expect(body.uploadUrl).toBe("https://s3.example/upload");
-    expect(s3.presignMediaUpload).toHaveBeenCalledTimes(1);
-    expect(s3.presignMediaUpload.mock.calls[0][1]).toBe("image/jpeg");
+    expect(body.action).toBe("https://s3.example/post");
+    expect(body.fields).toMatchObject({ key: "media/key", "x-amz-algorithm": "AWS4-HMAC-SHA256" });
+    expect(s3.presignMediaPost).toHaveBeenCalledTimes(1);
+    expect(s3.presignMediaPost.mock.calls[0][0]).toMatch(new RegExp(`^media/${USER}/[0-9a-f-]+\\.jpg$`));
+    expect(s3.presignMediaPost.mock.calls[0][1]).toBe("image/jpeg");
   });
 
   it("rejects unknown media kind (400)", async () => {
@@ -100,7 +107,7 @@ describe("attachments — presign", () => {
       "dev-1",
     );
     expect(res.statusCode).toBe(400);
-    expect(s3.presignMediaUpload).not.toHaveBeenCalled();
+    expect(s3.presignMediaPost).not.toHaveBeenCalled();
   });
 
   it("rejects malformed body (400)", async () => {
@@ -181,6 +188,101 @@ describe("attachments — create", () => {
       "dev-1",
     );
     expect(res.statusCode).toBe(400);
+  });
+
+  it("rejects create when the raw media was never uploaded to S3", async () => {
+    const crdb = crdbMock();
+    const llm = llmMock();
+    const s3 = s3Mock();
+    s3.headMediaObject = vi.fn(async () => ({ exists: false }));
+    const res = await handleCreateAttachment(
+      { body: JSON.stringify({ v: 1, attachment: IMAGE_ATTACHMENT }) } as any,
+      crdb,
+      llm,
+      s3,
+      "tok-1",
+      "dev-1",
+    );
+    expect(res.statusCode).toBe(400);
+    expect(crdb.executes.some((c: ExecuteCall) => c.sql.includes("INSERT INTO memory_nodes"))).toBe(false);
+  });
+
+  it("rejects create when sizeBytes mismatches the uploaded object", async () => {
+    const crdb = crdbMock();
+    const llm = llmMock();
+    const s3 = s3Mock();
+    s3.headMediaObject = vi.fn(async () => ({ exists: true, sizeBytes: 999 }));
+    const res = await handleCreateAttachment(
+      { body: JSON.stringify({ v: 1, attachment: IMAGE_ATTACHMENT }) } as any,
+      crdb,
+      llm,
+      s3,
+      "tok-1",
+      "dev-1",
+    );
+    expect(res.statusCode).toBe(400);
+    expect(crdb.executes.some((c: ExecuteCall) => c.sql.includes("INSERT INTO memory_nodes"))).toBe(false);
+  });
+
+  it("rejects + cleans up when the uploaded object exceeds 25MB (server truth)", async () => {
+    const crdb = crdbMock();
+    const llm = llmMock();
+    const s3 = s3Mock();
+    s3.headMediaObject = vi.fn(async () => ({ exists: true, sizeBytes: MAX_MEDIA_UPLOAD_BYTES + 1 }));
+    const res = await handleCreateAttachment(
+      { body: JSON.stringify({ v: 1, attachment: IMAGE_ATTACHMENT }) } as any,
+      crdb,
+      llm,
+      s3,
+      "tok-1",
+      "dev-1",
+    );
+    expect(res.statusCode).toBe(400);
+    expect(s3.deleteMediaObject).toHaveBeenCalledWith(IMAGE_ATTACHMENT.s3Key);
+    expect(crdb.executes.some((c: ExecuteCall) => c.sql.includes("INSERT INTO memory_nodes"))).toBe(false);
+  });
+
+  it("rejects when client sizeBytes itself exceeds 25MB (no S3 size to check)", async () => {
+    const crdb = crdbMock();
+    const llm = llmMock();
+    const s3 = s3Mock();
+    s3.headMediaObject = vi.fn(async () => ({ exists: true, sizeBytes: undefined }));
+    const res = await handleCreateAttachment(
+      {
+        body: JSON.stringify({
+          v: 1,
+          attachment: { ...IMAGE_ATTACHMENT, sizeBytes: MAX_MEDIA_UPLOAD_BYTES + 1 },
+        }),
+      } as any,
+      crdb,
+      llm,
+      s3,
+      "tok-1",
+      "dev-1",
+    );
+    expect(res.statusCode).toBe(400);
+    expect(s3.deleteMediaObject).toHaveBeenCalledWith(IMAGE_ATTACHMENT.s3Key);
+  });
+
+  it("create proceeds when sizeBytes is absent (no cross-check enforced)", async () => {
+    const crdb = crdbMock();
+    const llm = llmMock();
+    const s3 = s3Mock();
+    const res = await handleCreateAttachment(
+      {
+        body: JSON.stringify({
+          v: 1,
+          attachment: { ...IMAGE_ATTACHMENT, sizeBytes: undefined },
+        }),
+      } as any,
+      crdb,
+      llm,
+      s3,
+      "tok-1",
+      "dev-1",
+    );
+    expect(res.statusCode).toBe(200);
+    expect(crdb.executes.some((c: ExecuteCall) => c.sql.includes("INSERT INTO attachments"))).toBe(true);
   });
 
   it("rejects unknown kind (400)", async () => {

@@ -256,7 +256,10 @@ export interface AttachmentAnalysisInput {
 export interface PresignResponse {
   v: 1;
   key: string;
-  uploadUrl: string;
+  /** POST action URL — S3 presigned POST (cap ukuran 25MB via content-length-range). */
+  action: string;
+  /** Fields wajib dikirim sebagai multipart form bersama file bernama `file`. */
+  fields: Record<string, string>;
 }
 
 export interface CreateAttachmentResponse {
@@ -554,7 +557,7 @@ export const apiClient = {
   /** GET /health — Health check. */
   health: () => api<HealthResponse>("/health"),
 
-  /** POST /attachments/presign — Presigned PUT URL untuk raw media. */
+  /** POST /attachments/presign — Presigned POST untuk raw media (cap 25MB). */
   presignMedia: (
     body: { v: 1; kind: AttachmentKind; ext?: string; mimeType?: string },
     token: string,
@@ -567,17 +570,23 @@ export const apiClient = {
       body: JSON.stringify(body),
     }),
 
-  /** PUT raw blob langsung ke S3 memakai presigned URL. */
-  uploadMediaToS3: async (uploadUrl: string, blob: Blob, mimeType?: string): Promise<void> => {
+  /**
+   * Upload blob sebagai multipart form ke S3 (presigned POST). Field signature
+   * harus hadir sebelum field `file`; S3 sendiri yang menolak upload >25MB.
+   */
+  uploadMediaToS3: async (presigned: PresignResponse, blob: Blob): Promise<void> => {
+    const form = new FormData();
+    for (const [k, v] of Object.entries(presigned.fields)) form.append(k, v);
+    form.append("file", blob);
+
     let res: Response;
     try {
-      res = await fetch(uploadUrl, {
-        method: "PUT",
-        headers: mimeType ? { "Content-Type": mimeType } : undefined,
-        body: blob,
+      res = await fetch(presigned.action, {
+        method: "POST",
+        body: form,
       });
     } catch (err) {
-      // PUT langsung ke S3 selalu preflight cross-origin; TypeError 'Failed to fetch'
+      // POST ke S3 selalu preflight cross-origin; TypeError 'Failed to fetch'
       // = CORS bucket/CSP/network memblokir — beri pesan diagnosable yang menyebut
       // langkah media upload (bukan sekadar "Tidak dapat terhubung ke server").
       const classified = classifyFetchError(err);

@@ -19,7 +19,7 @@ import { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
 import { v4 as uuidv4 } from "uuid";
 import { CrdbClient } from "../lib/crdb";
 import { OpenRouterClient } from "../lib/openrouter";
-import { S3ClientService } from "../lib/s3";
+import { S3ClientService, MAX_MEDIA_UPLOAD_BYTES } from "../lib/s3";
 import { writeNodeEmbedding } from "../lib/vectorWriter";
 import { logger } from "../lib/logger";
 import { AppError, errorEnvelope, reportError } from "../lib/errors";
@@ -103,9 +103,9 @@ export async function handlePresignAttachment(
   try {
     const userId = await getUserId(crdb, token);
     const key = `media/${userId}/${uuidv4()}.${ext}`;
-    const uploadUrl = await s3.presignMediaUpload(key, body.mimeType);
+    const { url, fields } = await s3.presignMediaPost(key, body.mimeType);
 
-    return { statusCode: 200, headers: CORS, body: JSON.stringify({ v: 1, key, uploadUrl }) };
+    return { statusCode: 200, headers: CORS, body: JSON.stringify({ v: 1, key, action: url, fields }) };
   } catch (err) {
     const appErr = reportError(err);
     return {
@@ -148,6 +148,23 @@ export async function handleCreateAttachment(
     const prefix = expectedMediaPrefix(userId);
     if (!attachment.s3Key.startsWith(prefix)) {
       return badRequest("s3Key must be under the user's media prefix");
+    }
+
+    // Verifikasi raw media SUNGGAH sudah ter-upload ke S3 sebelum mencatat
+    // node — cegah memory node "hantu" tanpa bytes (roots penyebab kegagalan).
+    const head = await s3.headMediaObject(attachment.s3Key);
+    if (!head.exists) {
+      return badRequest("Media not uploaded yet — POST the blob to the presigned action first");
+    }
+    // Defense in depth kedua: reject bila ada pihak lain upload >25MB (cap
+    // utama ditegakkan S3 lewat presigned POST) dan buang bytes-nya.
+    const actualSize = head.sizeBytes ?? attachment.sizeBytes;
+    if (actualSize != null && actualSize > MAX_MEDIA_UPLOAD_BYTES) {
+      await s3.deleteMediaObject(attachment.s3Key).catch(() => undefined);
+      return badRequest("Media exceeds the 25MB upload limit");
+    }
+    if (attachment.sizeBytes != null && head.sizeBytes != null && head.sizeBytes !== attachment.sizeBytes) {
+      return badRequest("sizeBytes does not match the object in S3");
     }
 
     const nodeId = uuidv4();

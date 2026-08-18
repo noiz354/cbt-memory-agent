@@ -105,6 +105,13 @@ describe("apiClient 429 rate limiting", () => {
 });
 
 describe("apiClient uploadMediaToS3 CORS/network diagnostics", () => {
+  const PRESIGNED = {
+    v: 1 as const,
+    key: "media/usr-1/abc.jpg",
+    action: "https://s3.example/post",
+    fields: { key: "media/usr-1/abc.jpg", "x-amz-algorithm": "AWS4-HMAC-SHA256" },
+  };
+
   afterEach(() => {
     vi.unstubAllGlobals();
   });
@@ -112,7 +119,7 @@ describe("apiClient uploadMediaToS3 CORS/network diagnostics", () => {
   it("maps a browser CORS/CSP/network TypeError to media.upload_failed with a diagnosable message", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
 
-    const err = await apiClient.uploadMediaToS3("https://s3.example/put", new Blob(["x"]), "image/jpeg").then(
+    const err = await apiClient.uploadMediaToS3(PRESIGNED, new Blob(["x"], { type: "image/jpeg" })).then(
       () => null,
       (e: unknown) => e as { name?: string; code?: string; retriable?: boolean; message?: string },
     );
@@ -123,11 +130,25 @@ describe("apiClient uploadMediaToS3 CORS/network diagnostics", () => {
     expect(err?.message).toContain("CORS");
   });
 
+  it("builds a multipart form with signature fields before the file for the POST", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await apiClient.uploadMediaToS3(PRESIGNED, new Blob(["x"], { type: "image/jpeg" }));
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as [string, { method?: string; body?: FormData }];
+    expect(url).toBe("https://s3.example/post");
+    expect(init.method).toBe("POST");
+    const order = Array.from((init.body as FormData).keys());
+    expect(order).toEqual(["key", "x-amz-algorithm", "file"]);
+  });
+
   it("still surfaces HTTP rejection statuses as media.upload_failed", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 403 })));
 
     const err = await apiClient
-      .uploadMediaToS3("https://s3.example/put", new Blob(["x"]))
+      .uploadMediaToS3(PRESIGNED, new Blob(["x"]))
       .then(() => null, (e: Error & { code?: string; httpStatus?: number }) => e);
     expect(err?.code).toBe("media.upload_failed");
     expect(err?.httpStatus).toBe(403);

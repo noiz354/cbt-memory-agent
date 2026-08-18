@@ -12,11 +12,18 @@ vi.mock("@/shared/lib/apiClient", () => ({ apiClient: api }));
 
 import { indexAttachment } from "@/features/chat/lib/attachmentIndex";
 
+const PRESIGNED = {
+  v: 1 as const,
+  key: "media/usr-1/abc.jpg",
+  action: "https://s3.example/post",
+  fields: { key: "media/usr-1/abc.jpg", "x-amz-algorithm": "AWS4-HMAC-SHA256" },
+};
+
 describe("indexAttachment", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     auth.getAuthHeaders.mockReturnValue({ token: "tok-1", deviceId: "dev-1" });
-    api.presignMedia.mockResolvedValue({ v: 1, key: "media/usr-1/abc.jpg", uploadUrl: "https://s3.example/put" });
+    api.presignMedia.mockResolvedValue(PRESIGNED);
     api.uploadMediaToS3.mockResolvedValue(undefined);
     api.createAttachment.mockResolvedValue({ v: 1, ok: true, nodeId: "n-1", attachmentId: "a-1" });
   });
@@ -44,7 +51,7 @@ describe("indexAttachment", () => {
       "tok-1",
       "dev-1",
     );
-    expect(api.uploadMediaToS3).toHaveBeenCalledWith("https://s3.example/put", blob, "image/jpeg");
+    expect(api.uploadMediaToS3).toHaveBeenCalledWith(PRESIGNED, blob);
     expect(api.createAttachment).toHaveBeenCalledWith(
       {
         v: 1,

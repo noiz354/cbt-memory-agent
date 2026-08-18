@@ -5,12 +5,16 @@
  * `aws.s3.operation` + RED metric. Tanpa userId di attribute (hindari PII).
  */
 
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, ListObjectsV2Command, DeleteObjectsCommand, ObjectIdentifier } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, ListObjectsV2Command, DeleteObjectsCommand, ObjectIdentifier, HeadObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { createPresignedPost, PresignedPost } from "@aws-sdk/s3-presigned-post";
 import { v4 as uuidv4 } from "uuid";
 import { context, trace, SpanStatusCode } from "@opentelemetry/api";
 import { ATTR_RPC_SYSTEM } from "@opentelemetry/semantic-conventions/incubating";
 import { recordS3Operation } from "./telemetry";
+
+/** Cap upload media mentalah (raw media) — sesuai validasi klien & bucket S3. */
+export const MAX_MEDIA_UPLOAD_BYTES = 25 * 1024 * 1024;
 
 export class S3ClientService {
   private client: S3Client;
@@ -51,20 +55,39 @@ export class S3ClientService {
   }
 
   /**
-   * Presign an upload URL for raw media (emotion analysis attachments).
-   * Client PUT-upload blob langsung ke S3; 15 menit untuk mengejar perekaman.
+   * Presign upload media via POST (multipart form) dengan condition
+   * `content-length-range` (1..25MB). S3 PUT presign TIDAK mendukung
+   * content-length-range, maka POST dipakai agar S3 MENOLAK upload raksasa
+   * di sumber. Klien mengirim FormData ke `url` dengan semua `fields` +
+   * file bernama `file`.
    */
-  async presignMediaUpload(key: string, mimeType?: string): Promise<string> {
+  async presignMediaPost(key: string, mimeType?: string): Promise<PresignedPost> {
     return this.traced("PutObject", async () => {
-      const command = new PutObjectCommand({
+      return createPresignedPost(this.client, {
         Bucket: this.bucket,
         Key: key,
-        // Tanpa ServerSideEncryption: bucket punya default AES256 at rest, jadi
-        // x-amz-server-side-encryption TIDAK masuk SignedHeaders — klien cukup
-        // PUT polos (fetch/curl), tanpa harus mengirim header SSE.
-        ContentType: mimeType,
+        Conditions: [["content-length-range", 1, MAX_MEDIA_UPLOAD_BYTES]],
+        Expires: 900,
       });
-      return await getSignedUrl(this.client, command, { expiresIn: 900 });
+    });
+  }
+
+  /**
+   * Kabarkan keberadaan + ukuran object media (HEAD). NotFound → exists:false;
+   * error lain (AccessDenied, dsb.) tetap dilempar agar tidak menyembunyikan
+   * masalah izin/wiring.
+   */
+  async headMediaObject(key: string): Promise<{ exists: boolean; sizeBytes?: number }> {
+    return this.traced("HeadObject", async () => {
+      try {
+        const res = await this.client.send(
+          new HeadObjectCommand({ Bucket: this.bucket, Key: key }),
+        );
+        return { exists: true, sizeBytes: res.ContentLength };
+      } catch (err) {
+        if ((err as { name?: string })?.name === "NotFound") return { exists: false };
+        throw err;
+      }
     });
   }
 
