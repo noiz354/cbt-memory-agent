@@ -46,7 +46,13 @@ describe("S3ClientService", () => {
     const s3 = new S3ClientService("bucket-x");
     const post = await s3.presignMediaPost("media/u/abc.webm", "audio/webm");
 
-    const input = hoisted.createPresignedPostMock.mock.calls[0][1];
+    const call = hoisted.createPresignedPostMock.mock.calls[0] as unknown as [unknown, unknown];
+    const input = call[1] as {
+      Conditions: unknown[];
+      Bucket: string;
+      Key: string;
+      Expires: number;
+    };
     expect(input).toMatchObject({
       Bucket: "bucket-x",
       Key: "media/u/abc.webm",
@@ -60,7 +66,8 @@ describe("S3ClientService", () => {
   it("presignMediaPost is non-conditional on content type (client FormData decides)", async () => {
     const s3 = new S3ClientService("bucket-x");
     await s3.presignMediaPost("media/u/x.mp4", "video/mp4");
-    const input = hoisted.createPresignedPostMock.mock.calls[0][1];
+    const call = hoisted.createPresignedPostMock.mock.calls[0] as unknown as [unknown, unknown];
+    const input = call[1] as { Conditions: unknown[] };
     expect(input.Conditions).toHaveLength(1);
     expect(input.Conditions[0]).toEqual(["content-length-range", 1, MAX_MEDIA_UPLOAD_BYTES]);
   });
