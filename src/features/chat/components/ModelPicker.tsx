@@ -1,7 +1,7 @@
 import { useChatStore } from "@/features/chat/store/chatStore";
-import { allModels } from "@/shared/lib/llmRegistry";
+import { allModels, fetchOllamaModels, ollamaChatModels } from "@/shared/lib/llmRegistry";
 import { ChevronDown } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/shared/lib/cn";
 
 interface GroupedModel {
@@ -16,6 +16,31 @@ export function ModelPicker() {
   const setPreferredModel = useChatStore((s) => s.setPreferredModel);
   const [open, setOpen] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
+  const [ollamaModels, setOllamaModels] = useState<{ modelId: string; name: string }[]>([]);
+  const [ollamaReady, setOllamaReady] = useState(false);
+
+  // Muat model Ollama dinamis sekali saat mount (fetch /api/tags).
+  useEffect(() => {
+    let cancelled = false;
+    fetchOllamaModels()
+      .then((res) => {
+        if (cancelled) return;
+        if (res.ok) {
+          setOllamaModels(
+            ollamaChatModels(res.models).map((m) => ({
+              modelId: m.name,
+              name: `${m.name}${m.details?.parameter_size ? ` (${m.details.parameter_size})` : ""}`,
+            })),
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setOllamaReady(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const groups = useMemo<GroupedModel[]>(() => {
     const byProvider = new Map<string, GroupedModel>();
@@ -28,8 +53,20 @@ export function ModelPicker() {
       }
       g.models.push({ modelId: model.id, name: model.name });
     }
+
+    // Gabungkan model Ollama dinamis (kalau ada yang terdeteksi).
+    if (ollamaModels.length > 0) {
+      const g = byProvider.get("ollama") ?? {
+        providerId: "ollama",
+        providerName: "Ollama (Local)",
+        models: [],
+      };
+      g.models = ollamaModels;
+      byProvider.set("ollama", g);
+    }
+
     return [...byProvider.values()];
-  }, []);
+  }, [ollamaModels]);
 
   const currentProvider = groups.find((g) => g.providerId === preferredProviderId);
   const currentModel = currentProvider?.models.find((m) => m.modelId === preferredModelId);
@@ -76,7 +113,7 @@ export function ModelPicker() {
               className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm hover:bg-canvas"
             >
               <span className="font-medium">Auto</span>
-              <span className="text-[11px] text-ink-mute">on-device → backend → BYOK</span>
+              <span className="text-[11px] text-ink-mute">on-device → ollama → backend → BYOK</span>
             </button>
 
             {groups.map((g) => (
@@ -107,6 +144,12 @@ export function ModelPicker() {
                 ))}
               </div>
             ))}
+
+            {!ollamaReady && (
+              <p className="px-3 py-1.5 text-[11px] italic text-ink-mute">
+                Scanning local Ollama…
+              </p>
+            )}
           </div>
         </>
       )}

@@ -29,6 +29,7 @@ export function formatModelLabel(providerId: string | undefined, modelId: string
   if (!providerId) return "model";
   if (providerId === "local-webllm") return "on-device";
   if (providerId === "backend-proxy") return "backend";
+  if (providerId === "ollama") return "ollama";
   if (providerId === "openrouter") {
     const base = modelId?.split("/").pop() ?? "openrouter";
     return base;
@@ -40,6 +41,9 @@ export function formatModelLabel(providerId: string | undefined, modelId: string
 export function isValidModel(pref: PreferredModel | null): pref is PreferredModel {
   if (!pref) return false;
   if (!getProvider(pref.providerId)) return false;
+  // Model Ollama bersifat dinamis (fetch /api/tags) — tidak ada di registry
+  // statis, jadi terima provider ollama apa pun modelId-nya.
+  if (pref.providerId === "ollama") return pref.modelId.length > 0;
   return Boolean(getModel(pref.providerId, pref.modelId));
 }
 

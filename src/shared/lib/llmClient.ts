@@ -149,6 +149,10 @@ export async function callLLM(
     return callBackendProxy(fullRequest, onStream, started, signal);
   }
 
+  if (providerId === "ollama") {
+    return callOllama(fullRequest, onStream, started, signal);
+  }
+
   // BYOK: ambil key dari IndexedDB → call provider API
   return callBYOK(fullRequest, onStream, started, signal);
 }
@@ -182,7 +186,22 @@ export async function callLLMWithFallback(
     );
   } catch (err) {
     if (isAbortError(err)) throw err;
-    console.warn(`[LLM] First attempt (${firstAttempt.providerId}/${firstAttempt.modelId}) failed, trying backend:`, err);
+    console.warn(`[LLM] First attempt (${firstAttempt.providerId}/${firstAttempt.modelId}) failed, trying Ollama:`, err);
+  }
+
+  // 1.5 Coba Ollama lokal (gratis, tanpa key) — sebelum backend cloud.
+  //    Skip kalau user sudah memilih Ollama sebagai first attempt (sudah dicoba).
+  if (firstAttempt.providerId !== "ollama") {
+    try {
+      return await callLLM(
+        { providerId: "ollama", modelId: getProvider("ollama").defaultModel, messages },
+        onStream,
+        signal,
+      );
+    } catch (err) {
+      if (isAbortError(err)) throw err;
+      console.warn("[LLM] Ollama failed, trying backend:", err);
+    }
   }
 
   // 2. Coba backend proxy
@@ -305,6 +324,73 @@ async function callBackendProxy(
   }
 
   return parseBackendProxySSE(response, onStream, started, signal);
+}
+
+// ─────────────────────────────────────────────
+// Ollama (local fallback — tanpa API key)
+// ─────────────────────────────────────────────
+
+async function callOllama(
+  request: LLMRequest,
+  onStream: LLMStreamCallback | undefined,
+  started: number,
+  signal?: AbortSignal,
+): Promise<LLMResponse> {
+  const { fetchOllamaModels, ollamaBaseUrlCandidates } = await import("@/shared/lib/llmRegistry");
+  let baseUrl = getProvider("ollama").baseUrl;
+
+  // Kalau baseUrl default (localhost) tidak merespons (mis. WSL → Ollama di
+  // host Windows), coba kandidat lain (hostname.local) sebelum menyerah.
+  const candidates = ollamaBaseUrlCandidates();
+  if (!candidates.includes(baseUrl)) candidates.unshift(baseUrl);
+
+  let lastError: Error | null = null;
+  for (const candidate of candidates) {
+    try {
+      const url = `${candidate.replace(/\/$/, "")}/v1/chat/completions`;
+      const body = {
+        model: request.modelId,
+        messages: request.messages,
+        temperature: request.temperature ?? 0.7,
+        max_tokens: request.maxTokens ?? 2048,
+        stream: Boolean(onStream),
+      };
+
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal,
+      });
+
+      if (!response.ok) {
+        const text = await response.text().catch(() => "");
+        lastError = new Error(`Ollama HTTP ${response.status}: ${text.slice(0, 150)}`);
+        continue; // coba kandidat URL berikutnya
+      }
+
+      const result = await parseChatResponse(response, "ollama", request.modelId, onStream, started, signal);
+      return {
+        ...result,
+        providerId: "ollama",
+        modelId: request.modelId,
+        // Flag agar telemetry tahu ini pakai host lokal (bukan cloud).
+        tokensUsed: result.tokensUsed,
+        latencyMs: Date.now() - started,
+      };
+    } catch (err) {
+      if (isAbortError(err)) throw err;
+      lastError = err instanceof Error ? err : new Error(String(err));
+      // CORS/fetch error → coba kandidat berikutnya
+    }
+  }
+
+  // Semua kandidat gagal — beri tahu caller (fallback chain lanjut ke backend).
+  // Sertakan hint CORS agar user tahu cara mengaktifkan Ollama lintas-origin.
+  const hint = lastError?.message?.includes("Failed to fetch")
+    ? " (CORS? Set OLLAMA_ORIGINS=* lalu restart Ollama, atau set VITE_OLLAMA_URL)"
+    : "";
+  throw new Error(`Ollama unavailable: ${lastError?.message ?? "no reachable host"}${hint}`);
 }
 
 async function parseBackendProxySSE(

@@ -33,7 +33,8 @@ export type LLMProviderId =
   | "lambdalabs"
   | "huggingface"
   | "local-webllm"
-  | "backend-proxy";
+  | "backend-proxy"
+  | "ollama";
 
 export type LLMCostTier = "free" | "low" | "medium" | "high";
 export type LLMAuthType = "bearer" | "api-key" | "x-api-key";
@@ -537,7 +538,100 @@ export const PROVIDERS: Record<LLMProviderId, LLMProvider> = {
     docsUrl: "",
     keyUrl: "",
   },
+
+  // ── Local Ollama (fallback on-device, tanpa API key) ──
+  // Base URL bisa di-override via VITE_OLLAMA_URL (mis. http://hostname.local:11434
+  // di WSL ketika Ollama jalan di Windows host). Model di-fetch dinamis dari
+  // GET /api/tags saat runtime — lihat fetchOllamaModels().
+  ollama: {
+    id: "ollama",
+    name: "Ollama (Local)",
+    baseUrl: import.meta.env.VITE_OLLAMA_URL || "http://localhost:11434",
+    apiPath: "/v1/chat/completions",
+    authType: "api-key",
+    authHeader: "",
+    authPrefix: "",
+    models: [],
+    defaultModel: "llama3.1:latest",
+    costTier: "free",
+    supportsStreaming: true,
+    docsUrl: "https://ollama.com",
+    keyUrl: "",
+  },
 };
+
+// ─────────────────────────────────────────────
+// Ollama — list model dinamis dari /api/tags
+// ─────────────────────────────────────────────
+
+export interface OllamaTag {
+  name: string;
+  model: string;
+  details?: {
+    parameter_size?: string;
+    quantization_level?: string;
+    context_length?: number;
+  };
+  capabilities?: string[];
+}
+
+export interface OllamaModelsResult {
+  ok: boolean;
+  baseUrl: string;
+  models: OllamaTag[];
+  error?: string;
+}
+
+/**
+ * Candidate base URLs untuk Ollama. Urutan prioritas:
+ *   1. VITE_OLLAMA_URL (eksplisit)
+ *   2. http://localhost:11434
+ *   3. http://<hostname>.local:11434 (WSL → Windows host)
+ * Coba satu per satu sampai ada yang merespons.
+ */
+export function ollamaBaseUrlCandidates(): string[] {
+  const explicit = import.meta.env.VITE_OLLAMA_URL;
+  const hostname = typeof location !== "undefined" ? location.hostname : "localhost";
+  const candidates = explicit ? [explicit] : [];
+  candidates.push("http://localhost:11434");
+  if (hostname && hostname !== "localhost" && hostname !== "127.0.0.1") {
+    candidates.push(`http://${hostname}.local:11434`);
+  }
+  return [...new Set(candidates)];
+}
+
+async function fetchJson<T>(url: string, signal?: AbortSignal): Promise<T> {
+  const res = await fetch(url, { signal });
+  if (!res.ok) throw new Error(`Ollama HTTP ${res.status}`);
+  return (await res.json()) as T;
+}
+
+/**
+ * List model dari Ollama lokal. Mencoba semua kandidat base URL sampai satu
+ * berhasil; semua gagal → { ok:false, error }. Tidak pernah melempar.
+ */
+export async function fetchOllamaModels(signal?: AbortSignal): Promise<OllamaModelsResult> {
+  let lastError: string | null = null;
+  for (const baseUrl of ollamaBaseUrlCandidates()) {
+    try {
+      const data = await fetchJson<{ models: OllamaTag[] }>(`${baseUrl}/api/tags`, signal);
+      return { ok: true, baseUrl, models: data.models ?? [] };
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
+    }
+  }
+  return { ok: false, baseUrl: ollamaBaseUrlCandidates()[0], models: [], error: lastError ?? "unknown" };
+}
+
+/** Filter model yang bisa dipakai chat (bukan embedding-only). */
+export function ollamaChatModels(models: OllamaTag[]): OllamaTag[] {
+  return models.filter(
+    (m) =>
+      !m.capabilities ||
+      m.capabilities.includes("completion") ||
+      m.capabilities.includes("tools"),
+  );
+}
 
 // ─────────────────────────────────────────────
 // Helpers
