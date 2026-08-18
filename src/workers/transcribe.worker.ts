@@ -11,13 +11,17 @@ import { pipeline, env } from "@huggingface/transformers";
 env.allowLocalModels = false;
 
 type AsrPipeline = (
-  audio: string,
+  audio: string | Float32Array,
   options?: { language?: string; return_timestamps?: boolean },
 ) => Promise<{ text?: string }>;
 
 interface TranscribeIn {
   type: "transcribe";
-  blobUrl: string;
+  /** Decoded mono Float32Array @16kHz (diprioritaskan; di-decode di main thread
+   *  karena AudioContext tidak tersedia di Worker — lihat decodeAudio). */
+  audio?: Float32Array;
+  /** Legacy: URL blob (dipertahankan untuk back-compat/test). */
+  blobUrl?: string;
   /** ISO-639-1 language hint (e.g. "id" / "en"); undefined = auto-detect. */
   language?: string;
 }
@@ -71,9 +75,11 @@ export async function handleTranscribe(message: TranscribeIn): Promise<Transcrib
 
   let output: { text?: string };
   try {
-    // NB: cannot build an <audio> element here — no DOM in a worker. Duration
-    // is measured on the main thread in voiceNote.ts.
-    output = await model(message.blobUrl, {
+    // Decoded 16kHz mono Float32Array dikirim dari main thread (Worker tak punya
+    // AudioContext untuk decode URL). Jatuh ke blobUrl hanya bila audio kosong
+    // (back-compat/test — akan gagal di worker nyata, tercatat stage=inference).
+    const audio: string | Float32Array = message.audio ?? message.blobUrl!;
+    output = await model(audio, {
       language: message.language ?? "auto",
       // 0 = no timestamp decoding; single contiguous transcript is enough
       return_timestamps: false,

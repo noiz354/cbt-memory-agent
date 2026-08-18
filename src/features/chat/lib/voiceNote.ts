@@ -2,6 +2,7 @@ import { startAudioWorker, stopAudioWorker } from "@/workers/audioClient";
 import { useChatStore } from "@/features/chat/store/chatStore";
 import { isWebSpeechSupported, startLiveRecognition, type LiveRecognition } from "./webSpeech";
 import { track, TELEMETRY_EVENTS } from "@/shared/lib/telemetryEvents";
+import { decodeAudioTo16000 } from "@/shared/lib/decodeAudio";
 
 /**
  * Voice-note capture on top of the audio worker pipeline.
@@ -131,7 +132,7 @@ export async function stopVoiceNote(): Promise<VoiceNoteResult> {
       const liveFallbackText = liveRecognition?.getTranscript();
       liveRecognition?.stop();
       liveRecognition = null;
-      void transcribeVoiceNote(blobUrl, mimeType, liveFallbackText).then(resolve);
+      void transcribeVoiceNote(blob, blobUrl, mimeType, liveFallbackText).then(resolve);
     };
 
     if (r.mediaRecorder.state === "inactive") {
@@ -200,6 +201,7 @@ function measureBlobDuration(blobUrl: string): Promise<number> {
 }
 
 async function transcribeVoiceNote(
+  blob: Blob,
   blobUrl: string,
   mimeType: string,
   liveFallbackText?: string,
@@ -209,6 +211,18 @@ async function transcribeVoiceNote(
     return new Promise<VoiceNoteResult>((resolve) => resolveFromFallback(resolve, liveFallbackText, blobUrl));
   }
   const durationMs = await measureBlobDuration(blobUrl);
+
+  // Decode ke 16kHz mono Float32Array di main thread — Whisper me-resample via
+  // AudioContext yang tidak ada di Worker; Float32Array yang diberi ke pipeline
+  // tidak di-resample oleh transformers.js.
+  let audio: Float32Array;
+  try {
+    audio = await decodeAudioTo16000(blob);
+  } catch (err) {
+    trackTranscriptFailure("whisper", "decode", err instanceof Error ? err.message : "decode failed");
+    return new Promise<VoiceNoteResult>((resolve) => resolveFromFallback(resolve, liveFallbackText, blobUrl));
+  }
+
   return new Promise((resolve) => {
     const onMsg = (event: MessageEvent<TranscribeMsg>) => {
       transcribeWorker?.removeEventListener("message", onMsg);
@@ -233,7 +247,7 @@ async function transcribeVoiceNote(
       }
     };
     transcribeWorker.addEventListener("message", onMsg);
-    transcribeWorker.postMessage({ type: "transcribe", blobUrl, language: detectLanguage() });
+    transcribeWorker.postMessage({ type: "transcribe", audio, language: detectLanguage() }, [audio.buffer]);
   });
 }
 

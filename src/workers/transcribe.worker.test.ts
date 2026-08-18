@@ -51,6 +51,16 @@ describe("transcribe worker", () => {
     expect(model).toHaveBeenCalledWith("blob:1", expect.objectContaining({ language: "id" }));
   });
 
+  it("passes a decoded Float32Array through to the model (16kHz mono)", async () => {
+    model.mockResolvedValue({ text: "halo" });
+    const { handleTranscribe } = await loadWorker();
+    const pcm = new Float32Array([0.1, -0.2, 0.3]);
+    const out = await handleTranscribe({ type: "transcribe", blobUrl: "blob:1", audio: pcm, language: "en" });
+    expect(out.ok).toBe(true);
+    // Pipeline menerima Float32Array (bukan string/URL) + language hint.
+    expect(model).toHaveBeenCalledWith(pcm, expect.objectContaining({ language: "en" }));
+  });
+
   it("reports model-load failures with stage and message", async () => {
     mockPipeline.mockRejectedValue(new Error("model 404"));
     const { handleTranscribe } = await loadWorker();
