@@ -158,70 +158,93 @@ export class OpenRouterClient {
     messages: ChatMessage[],
     opts: { maxTokens?: number } = {},
   ): AsyncGenerator<string, ChatResult> {
-    const res = await fetch(`${BASE_URL}/chat/completions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${this.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: CHAT_MODEL,
-        messages,
-        stream: true,
-        max_tokens: opts.maxTokens ?? 1024,
-      }),
-    });
+    const tracer = trace.getTracer("cbt-memory-agent-backend", "0.1.0");
+    const parentCtx = context.active();
+    const span = tracer.startSpan("llm.openrouter", { attributes: {} }, parentCtx);
+    const startedAt = Date.now();
 
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw classifyChatError(res.status, text);
-    }
-
-    const reader = res.body?.getReader();
-    if (!reader) throw new Error("OpenRouter chat: response body not readable");
-
-    const decoder = new TextDecoder();
-    let content = "";
-    let tokensUsed = 0;
-    let buffer = "";
+    span.setAttribute(ATTR_GEN_AI_SYSTEM, "openrouter");
+    span.setAttribute(ATTR_GEN_AI_OPERATION_NAME, "chat");
+    span.setAttribute("gen_ai.request.model", CHAT_MODEL);
+    span.setAttribute("openinference.span.kind", "LLM");
+    span.setAttribute("gen_ai.request.input", JSON.stringify(messages).slice(0, 30_000));
 
     try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      const res = await context.with(trace.setSpan(parentCtx, span), async () => {
+        return fetch(`${BASE_URL}/chat/completions`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${this.apiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: CHAT_MODEL,
+            messages,
+            stream: true,
+            max_tokens: opts.maxTokens ?? 1024,
+          }),
+        });
+      });
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw classifyChatError(res.status, text);
+      }
 
-        for (const raw of lines) {
-          const line = raw.trim();
-          if (!line.startsWith("data:")) continue;
-          const payload = line.slice(5).trim();
-          if (payload === "[DONE]") break;
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("OpenRouter chat: response body not readable");
 
-          try {
-            const json = JSON.parse(payload) as {
-              choices?: { delta?: { content?: string } }[];
-              usage?: { total_tokens?: number };
-            };
-            const delta = json.choices?.[0]?.delta?.content ?? "";
-            if (delta) {
-              content += delta;
-              tokensUsed += Math.max(1, Math.ceil(delta.length / 4));
-              yield delta;
+      const decoder = new TextDecoder();
+      let content = "";
+      let tokensUsed = 0;
+      let buffer = "";
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+
+          for (const raw of lines) {
+            const line = raw.trim();
+            if (!line.startsWith("data:")) continue;
+            const payload = line.slice(5).trim();
+            if (payload === "[DONE]") break;
+
+            try {
+              const json = JSON.parse(payload) as {
+                choices?: { delta?: { content?: string } }[];
+                usage?: { total_tokens?: number };
+              };
+              const delta = json.choices?.[0]?.delta?.content ?? "";
+              if (delta) {
+                content += delta;
+                tokensUsed += Math.max(1, Math.ceil(delta.length / 4));
+                yield delta;
+              }
+              if (json.usage?.total_tokens) tokensUsed = json.usage.total_tokens;
+            } catch {
+              // Skip malformed SSE lines
             }
-            if (json.usage?.total_tokens) tokensUsed = json.usage.total_tokens;
-          } catch {
-            // Skip malformed SSE lines
           }
         }
+      } finally {
+        reader.releaseLock();
       }
-    } finally {
-      reader.releaseLock();
-    }
 
-    return { content, tokensUsed };
+      span.setAttribute("gen_ai.response.text", content.slice(0, 30_000));
+      span.setAttribute("gen_ai.usage.total_tokens", tokensUsed);
+      return { content, tokensUsed };
+    } catch (err) {
+      span.recordException(err instanceof Error ? err : new Error(String(err)));
+      throw err;
+    } finally {
+      span.end();
+      recordGenAiOperation("chat", Date.now() - startedAt);
+    }
   }
 
   /**

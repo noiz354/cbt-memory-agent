@@ -276,6 +276,45 @@ async function callBackendProxy(
   started: number,
   signal?: AbortSignal,
 ): Promise<LLMResponse> {
+  // Span LLM frontend untuk jalur backend-proxy. Tanpa ini chat turn default
+  // tidak menghasilkan span LLM di Phoenix (hanya span HTTP fetch), dan saat
+  // backend gagal (mis. llm.quota_exhausted) tidak ada jejak prompt sama sekali.
+  return withSpan(
+    "llm.backend",
+    async (span) => {
+      span.setAttribute("gen_ai.provider", "backend-proxy");
+      span.setAttribute("gen_ai.request.model", request.modelId);
+      span.setAttribute("openinference.span.kind", "LLM");
+      span.setAttribute("gen_ai.request.input", JSON.stringify(request.messages));
+      if (request.backendUserText) {
+        span.setAttribute("gen_ai.request.backend_user_text", request.backendUserText);
+      }
+
+      try {
+        const result = await callBackendProxyInner(request, onStream, started, signal);
+        span.setAttribute("gen_ai.response.text", result.content);
+        span.setAttribute("gen_ai.response.model", result.modelId);
+        if (result.tokensUsed != null) {
+          span.setAttribute("gen_ai.usage.output_tokens", result.tokensUsed);
+        }
+        return result;
+      } catch (err) {
+        // Backend gagal (quota, 4xx/5xx) — span tetap tercatat sebagai error
+        // dengan prompt-nya, sehingga chat turn terlihat di Phoenix walau gagal.
+        span.setAttribute("error.message", err instanceof Error ? err.message : String(err));
+        throw err;
+      }
+    },
+    { attributes: { "llm.backend.user_message": request.backendUserText ?? "" } },
+  );
+}
+
+async function callBackendProxyInner(
+  request: LLMRequest,
+  onStream: LLMStreamCallback | undefined,
+  started: number,
+  signal?: AbortSignal,
+): Promise<LLMResponse> {
   const provider = getProvider("backend-proxy");
   const url = `${provider.baseUrl}${provider.apiPath}`;
 
@@ -331,6 +370,39 @@ async function callBackendProxy(
 // ─────────────────────────────────────────────
 
 async function callOllama(
+  request: LLMRequest,
+  onStream: LLMStreamCallback | undefined,
+  started: number,
+  signal?: AbortSignal,
+): Promise<LLMResponse> {
+  // Span LLM untuk provider lokal Ollama — supaya chat via Ollama tercatat di
+  // Phoenix dengan prompt + respons, konsisten dengan provider lain.
+  return withSpan(
+    "llm.ollama",
+    async (span) => {
+      span.setAttribute("gen_ai.provider", "ollama");
+      span.setAttribute("gen_ai.request.model", request.modelId);
+      span.setAttribute("openinference.span.kind", "LLM");
+      span.setAttribute("gen_ai.request.input", JSON.stringify(request.messages));
+
+      try {
+        const result = await callOllamaInner(request, onStream, started, signal);
+        span.setAttribute("gen_ai.response.text", result.content);
+        span.setAttribute("gen_ai.response.model", result.modelId);
+        if (result.tokensUsed != null) {
+          span.setAttribute("gen_ai.usage.output_tokens", result.tokensUsed);
+        }
+        return result;
+      } catch (err) {
+        span.setAttribute("error.message", err instanceof Error ? err.message : String(err));
+        throw err;
+      }
+    },
+    { attributes: { "llm.ollama.model": request.modelId } },
+  );
+}
+
+async function callOllamaInner(
   request: LLMRequest,
   onStream: LLMStreamCallback | undefined,
   started: number,
