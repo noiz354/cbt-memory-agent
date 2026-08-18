@@ -26,10 +26,13 @@ let silenceFrames = 0;
 /**
  * Try AudioWorklet first; fallback to ScriptProcessorNode if unsupported.
  *
- * VAD (Voice Activity Detection) runs in parallel:
- * - When VAD says "no voice" → PCM is discarded (saves CPU for transcription)
- * - When VAD says "voice" → PCM forwarded to analysis worker
- * - After SILENCE_FLUSH_FRAMES of silence → flush buffer signal
+ * VAD (Voice Activity Detection) runs in parallel HANYA bila ada konsumen:
+ * - onVoice diberikan → VAD worker (Silero ONNX) dijalankan.
+ *   - VAD "no voice" → PCM tidak diteruskan (hemat CPU transkripsi)
+ *   - VAD "voice" → PCM diteruskan ke analysis worker
+ *   - Setelah SILENCE_FLUSH_FRAMES hening → sinyal flush buffer
+ * - onVoice TIDAK diberikan → tanpa VAD worker sama sekali (hindari unduh model
+ *   ~2.3MB + inferensi tiap frame tanpa output); PCM langsung ke level meter.
  *
  * Important: we do NOT connect to destination (context.destination).
  * This prevents echo/speaker feedback when only analysis is needed.
@@ -41,19 +44,23 @@ export async function startAudioWorker(
 ) {
   stopAudioWorker();
 
-  // Start VAD worker
-  vadWorker = new Worker(new URL("./vad.worker.ts", import.meta.url), { type: "module" });
-  vadWorker.onmessage = (event: MessageEvent<VadResult>) => {
-    if (event.data.type !== "voice") return;
-    voiceActive = event.data.isVoice;
-    onVoice?.(event.data.isVoice, event.data.probability);
+  const hasVadConsumer = typeof onVoice === "function";
 
-    if (!event.data.isVoice) {
-      silenceFrames++;
-    } else {
-      silenceFrames = 0;
-    }
-  };
+  // Start VAD worker — only when someone consumes VAD verdicts.
+  if (hasVadConsumer) {
+    vadWorker = new Worker(new URL("./vad.worker.ts", import.meta.url), { type: "module" });
+    vadWorker.onmessage = (event: MessageEvent<VadResult>) => {
+      if (event.data.type !== "voice") return;
+      voiceActive = event.data.isVoice;
+      onVoice(event.data.isVoice, event.data.probability);
+
+      if (!event.data.isVoice) {
+        silenceFrames++;
+      } else {
+        silenceFrames = 0;
+      }
+    };
+  }
 
   // Start analysis worker (RMS/peak level meter)
   worker = new Worker(new URL("./audio.worker.ts", import.meta.url), { type: "module" });
@@ -76,14 +83,15 @@ export async function startAudioWorker(
         if (event.data.type !== "pcm") return;
         const samples = event.data.samples as Float32Array;
 
-        // VAD gate: only forward PCM when voice is detected or VAD is disabled
-        if (!vadEnabled) {
+        // VAD gate: hanya forward PCM ke VAD bila VAD aktif; tanpa konsumen
+        // VAD atau VAD dinonaktifkan, PCM langsung ke level meter.
+        if (!vadWorker || !vadEnabled) {
           worker?.postMessage({ type: "pcm", samples });
           return;
         }
 
         // Send to VAD for detection
-        vadWorker?.postMessage(
+        vadWorker.postMessage(
           { type: "pcm", samples, sampleRate: context!.sampleRate },
           [samples.buffer],
         );
