@@ -47,7 +47,9 @@ export function ChatBubble({ message }: ChatBubbleProps) {
     <motion.article
       ref={setNodeRef}
       style={style}
-      layout
+      // CATATAN: jangan tambahkan prop `layout` di sini. ChatStream memakai
+      // virtualizer (row absolute + translateY + measureElement); animasi layout
+      // framer-motion bertabrakan dengan pengukuran → bubble overlap saat streaming.
       initial={{ opacity: 0, y: 10, scale: 0.98 }}
       animate={{ opacity: isDragging ? 0.45 : 1, y: 0, scale: 1 }}
       transition={{ type: "spring", stiffness: 300, damping: 25 }}
