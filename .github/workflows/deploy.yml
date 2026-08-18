@@ -6,6 +6,7 @@ on:
       - 'lambda/**'
       - 'infra/**'
       - 'src/**'
+      - 'prompts/**'
       - '.github/workflows/deploy.yml'
       - 'scripts/**'
 
